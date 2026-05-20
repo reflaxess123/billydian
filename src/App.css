@@ -101,7 +101,10 @@ html, body {
   position: fixed;
   inset: 0;
   background: var(--bg);
-  border-radius: var(--radius-lg);
+  /* Match Windows 11's default window rounding (DWMWCP_ROUND ≈ 8px).
+     We render this ourselves because the window is frameless
+     (decorations: false) — DWM can't round a transparent surface for us. */
+  border-radius: 8px;
   overflow: hidden;
   border: 1px solid var(--border);
   display: flex;
