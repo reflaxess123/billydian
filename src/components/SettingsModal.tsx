@@ -30,17 +30,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 }) => {
   const [showKey, setShowKey] = useState(false);
   const [showS3Secret, setShowS3Secret] = useState(false);
+  const [closing, setClosing] = useState(false);
+
+  // Play the modal-out animation before actually unmounting. Duration
+  // here must match the CSS `modalOut`/`fadeOut` keyframes (220 ms).
+  const requestClose = () => {
+    if (closing) return;
+    setClosing(true);
+    setTimeout(onClose, 220);
+  };
 
   const setS3 = (patch: Partial<AppSettings["s3"]>) => {
     onChange({ ...settings, s3: { ...settings.s3, ...patch } });
   };
 
   return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
-      <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
+    <div
+      className={`modal-backdrop${closing ? " closing" : ""}`}
+      onMouseDown={requestClose}
+    >
+      <div
+        className={`modal${closing ? " closing" : ""}`}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
         <div className="modal-header">
           <h2>Settings</h2>
-          <button className="modal-close" onClick={onClose} aria-label="Close">
+          <button className="modal-close" onClick={requestClose} aria-label="Close">
             <X size={16} />
           </button>
         </div>
@@ -263,7 +278,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         <div className="modal-footer">
-          <button className="modal-btn primary" onClick={onClose}>
+          <button className="modal-btn primary" onClick={requestClose}>
             Done
           </button>
         </div>

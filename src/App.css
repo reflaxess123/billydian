@@ -234,72 +234,59 @@ html, body {
   transform: rotate(20deg);
 }
 
-/* Sync feedback chip — sits under the top row of the sidebar. */
-.sidebar-sync-chip {
-  display: flex;
+/* Right-side cluster: sync feedback (when present) + sync btn + theme */
+.sidebar-top-actions {
+  display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 8px 6px 10px;
+}
+
+/* Inline sync feedback — sits to the LEFT of the sync icon while the
+   user looks at it, fades in on appear, fades out on auto-dismiss. */
+.sync-inline {
+  font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  line-height: 1;
+  padding: 5px 8px;
   border-radius: var(--radius-sm);
-  font: 500 11px / 1.2 inherit;
-  animation: syncChipIn 0.2s var(--ease-out);
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Animation: appear via opacity+slide; the exit transition is on the
+     same properties (no animation), driven by React unmount. */
+  animation: syncInlineIn 0.18s var(--ease-out);
+  transition: opacity 0.4s var(--ease-out), transform 0.4s var(--ease-out);
 }
-@keyframes syncChipIn {
-  from { opacity: 0; transform: translateY(-3px); }
-  to   { opacity: 1; transform: translateY(0); }
+@keyframes syncInlineIn {
+  from { opacity: 0; transform: translateX(6px); }
+  to   { opacity: 1; transform: translateX(0); }
 }
-.sidebar-sync-chip.busy {
+.sync-inline.busy {
   background: var(--surface);
   color: var(--muted);
 }
-.sidebar-sync-chip.ok {
+.sync-inline.ok {
   background: color-mix(in srgb, var(--ok) 14%, transparent);
   color: var(--fg);
 }
-.sidebar-sync-chip.err {
+.sync-inline.err {
   background: color-mix(in srgb, var(--danger) 14%, transparent);
   color: var(--danger);
 }
-.sidebar-sync-stats {
-  flex: 1 1 auto;
-  font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", SFMono-Regular, Menlo, monospace;
-  font-size: 10.5px;
-  font-variant-numeric: tabular-nums;
-}
-.sidebar-sync-stats strong {
+.sync-inline strong {
   color: var(--fg);
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
   margin: 0 1px;
 }
-.sidebar-sync-chip.ok svg:first-child,
-.sidebar-sync-chip.busy svg:first-child { color: var(--muted); }
-.sidebar-sync-err { color: var(--danger); font-weight: 700; }
-.sidebar-sync-text {
-  flex: 1 1 auto;
-  min-width: 0;
-  font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", SFMono-Regular, Menlo, monospace;
-  font-size: 10.5px;
+.sync-inline-text {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
-.sidebar-sync-x {
-  appearance: none;
-  width: 18px; height: 18px;
-  border: none;
-  background: transparent;
-  color: inherit;
-  border-radius: 4px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0.6;
-  flex-shrink: 0;
-  transition: opacity 0.12s var(--ease-out), background 0.12s var(--ease-out);
-}
-.sidebar-sync-x:hover { opacity: 1; background: rgba(0,0,0,0.06); }
-.dark .sidebar-sync-x:hover { background: rgba(255,255,255,0.08); }
 
 /* Vault picker chip */
 .vault-pick-btn {
@@ -598,7 +585,9 @@ html, body {
   z-index: 200;
   animation: fadeIn 0.18s var(--ease-out);
 }
-@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.modal-backdrop.closing { animation: fadeOut 0.22s var(--ease-out) forwards; }
+@keyframes fadeIn  { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
 
 .modal {
   width: min(720px, 92vw);
@@ -612,9 +601,14 @@ html, body {
   overflow: hidden;
   animation: modalIn 0.22s var(--ease-spring);
 }
+.modal.closing { animation: modalOut 0.22s var(--ease-out) forwards; }
 @keyframes modalIn {
   from { opacity: 0; transform: translateY(8px) scale(0.98); }
-  to   { opacity: 1; transform: translateY(0) scale(1); }
+  to   { opacity: 1; transform: translateY(0)    scale(1); }
+}
+@keyframes modalOut {
+  from { opacity: 1; transform: translateY(0)    scale(1); }
+  to   { opacity: 0; transform: translateY(8px) scale(0.98); }
 }
 
 .modal-header {

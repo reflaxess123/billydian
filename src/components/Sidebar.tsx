@@ -11,8 +11,6 @@ import {
   ZoomIn,
   ZoomOut,
   RefreshCw,
-  X,
-  AlertTriangle,
 } from "lucide-react";
 import { AppSettings, VaultEntry } from "../types";
 import { SyncReport } from "../App";
@@ -40,7 +38,6 @@ interface SidebarProps {
   syncing: boolean;
   syncReport: SyncReport | null;
   syncError: string | null;
-  onDismissSyncReport: () => void;
 }
 
 const SCALE_STEP = 0.1;
@@ -65,7 +62,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   syncing,
   syncReport,
   syncError,
-  onDismissSyncReport,
 }) => {
   const [topic, setTopic] = useState("");
   const [genKind, setGenKind] = useState<NewKind>("mindmap");
@@ -117,81 +113,62 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <ZoomIn size={13} />
             </button>
           </div>
-          <button
-            className="theme-icon-btn"
-            onClick={onSync}
-            disabled={!s3Ready || syncing}
-            title={
-              !s3Ready
-                ? "Fill in S3 settings to enable sync"
-                : syncing
-                ? "Syncing…"
-                : "Sync vault with S3"
-            }
-            aria-label="Sync vault"
-          >
-            <RefreshCw size={14} className={syncing ? "spin" : ""} />
-          </button>
-          <button
-            className="theme-icon-btn"
-            onClick={toggleTheme}
-            title={settings.theme === "dark" ? "Switch to light" : "Switch to dark"}
-            aria-label="Toggle theme"
-          >
-            {settings.theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
-          </button>
-        </div>
-
-        {/* Sync feedback row — appears under the top controls and stays
-            until dismissed or the next sync starts. */}
-        {(syncing || syncReport || syncError) && (
-          <div
-            className={`sidebar-sync-chip${syncError ? " err" : syncing ? " busy" : " ok"}`}
-            title={syncError ?? "Last sync result"}
-          >
-            {syncing ? (
-              <>
-                <RefreshCw size={11} className="spin" />
-                <span>Syncing…</span>
-              </>
-            ) : syncError ? (
-              <>
-                <AlertTriangle size={11} />
-                <span className="sidebar-sync-text">
-                  {syncError.length > 60 ? syncError.slice(0, 57) + "…" : syncError}
-                </span>
-                <button
-                  className="sidebar-sync-x"
-                  onClick={onDismissSyncReport}
-                  aria-label="Dismiss"
-                >
-                  <X size={10} />
-                </button>
-              </>
-            ) : syncReport ? (
-              <>
-                <span className="sidebar-sync-stats">
-                  ↑<strong>{syncReport.uploaded}</strong>{" "}
-                  ↓<strong>{syncReport.downloaded}</strong>{" "}
-                  =<strong>{syncReport.skipped}</strong>
-                  {syncReport.deleted > 0 && (
-                    <> 🗑<strong>{syncReport.deleted}</strong></>
-                  )}
-                  {syncReport.errors.length > 0 && (
-                    <> <span className="sidebar-sync-err">⚠{syncReport.errors.length}</span></>
-                  )}
-                </span>
-                <button
-                  className="sidebar-sync-x"
-                  onClick={onDismissSyncReport}
-                  aria-label="Dismiss"
-                >
-                  <X size={10} />
-                </button>
-              </>
-            ) : null}
+          {/* Right cluster: sync feedback label (sits LEFT of the sync
+              icon when present) + sync button + theme switch. The label
+              auto-dismisses ~3 s after a sync completes, but fades out
+              gracefully via CSS, not abruptly. */}
+          <div className="sidebar-top-actions">
+            {(syncing || syncReport || syncError) && (
+              <span
+                className={`sync-inline${syncError ? " err" : syncing ? " busy" : " ok"}`}
+                title={syncError ?? "Last sync result"}
+              >
+                {syncing ? (
+                  "Syncing…"
+                ) : syncError ? (
+                  <span className="sync-inline-text">
+                    {syncError.length > 32 ? syncError.slice(0, 29) + "…" : syncError}
+                  </span>
+                ) : syncReport ? (
+                  <>
+                    ↑<strong>{syncReport.uploaded}</strong>{" "}
+                    ↓<strong>{syncReport.downloaded}</strong>{" "}
+                    ={syncReport.skipped}
+                    {syncReport.deleted > 0 && (
+                      <> 🗑<strong>{syncReport.deleted}</strong></>
+                    )}
+                    {syncReport.errors.length > 0 && (
+                      <> ⚠{syncReport.errors.length}</>
+                    )}
+                  </>
+                ) : null}
+              </span>
+            )}
+            <button
+              className="theme-icon-btn"
+              onClick={onSync}
+              disabled={!s3Ready || syncing}
+              title={
+                !s3Ready
+                  ? "Fill in S3 settings to enable sync"
+                  : syncing
+                  ? "Syncing…"
+                  : "Sync vault with S3"
+              }
+              aria-label="Sync vault"
+            >
+              <RefreshCw size={14} className={syncing ? "spin" : ""} />
+            </button>
+            <button
+              className="theme-icon-btn"
+              onClick={toggleTheme}
+              title={settings.theme === "dark" ? "Switch to light" : "Switch to dark"}
+              aria-label="Toggle theme"
+            >
+              {settings.theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+            </button>
           </div>
-        )}
+        </div>
 
         {/* Vault picker chip */}
         <button

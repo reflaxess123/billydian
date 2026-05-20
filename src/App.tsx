@@ -663,6 +663,20 @@ function App() {
     }
   }, [vaultPath, s3Ready, syncing, settings.s3, refreshTree]);
 
+  // Auto-clear the sync feedback a few seconds after it lands — the
+  // sidebar shows the result inline; we don't want it lingering forever.
+  // Errors stick around a bit longer so the user can read them.
+  useEffect(() => {
+    if (syncing) return;
+    if (!syncReport && !syncError) return;
+    const linger = syncError ? 6000 : 3000;
+    const t = setTimeout(() => {
+      setSyncReport(null);
+      setSyncError(null);
+    }, linger);
+    return () => clearTimeout(t);
+  }, [syncing, syncReport, syncError]);
+
   // Derive a display title for the current note: basename without ext.
   const noteTitle = (() => {
     if (!openDoc || openDoc.kind !== "md") return "";
@@ -699,7 +713,6 @@ function App() {
         syncing={syncing}
         syncReport={syncReport}
         syncError={syncError}
-        onDismissSyncReport={() => { setSyncReport(null); setSyncError(null); }}
       />
 
       <div className="main-column">
