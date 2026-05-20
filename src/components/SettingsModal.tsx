@@ -94,11 +94,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </p>
           </section>
 
-          {/* Model */}
+          {/* Model — no heading, the chip itself with its Cpu icon
+              telegraphs what it's for, and the tip below the chip
+              already mentions "model slug". */}
           <section className="modal-section">
-            <h3>
-              <Cpu size={14} /> AI model
-            </h3>
             <div className="model-combo">
               <Cpu size={14} className="model-combo-icon" />
               <input
