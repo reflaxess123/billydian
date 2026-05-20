@@ -48,7 +48,29 @@ pub struct SyncReport {
     pub uploaded: u32,
     pub downloaded: u32,
     pub skipped: u32,
+    pub deleted: u32,
     pub errors: Vec<String>,
+}
+
+/// Path segments we never sync. `.mindmapper` holds our settings + s3
+/// creds; `.git`/`.svn`/`.hg` are tool junk; `node_modules` is huge and
+/// regeneratable. The OS-specific cache files at the bottom are obvious.
+///
+/// During sync, anything that matches this list is:
+///   - skipped locally (we don't upload it), AND
+///   - actively deleted on the remote side if it's already there.
+const EXCLUDED_SEGMENTS: &[&str] = &[
+    ".mindmapper",
+    ".git",
+    ".svn",
+    ".hg",
+    "node_modules",
+    "Thumbs.db",
+    ".DS_Store",
+];
+
+fn is_excluded_rel(rel: &str) -> bool {
+    rel.split('/').any(|seg| EXCLUDED_SEGMENTS.contains(&seg))
 }
 
 // ─── SigV4 primitives ──────────────────────────────────────────────────────
@@ -222,7 +244,7 @@ fn walk_local(root: &Path, dir: &Path, out: &mut Vec<LocalEntry>) -> Result<(), 
         let entry = entry.map_err(|e| e.to_string())?;
         let p = entry.path();
         let name = entry.file_name().to_string_lossy().to_string();
-        if name == ".mindmapper" || name == "Thumbs.db" || name == ".DS_Store" {
+        if EXCLUDED_SEGMENTS.contains(&name.as_str()) {
             continue;
         }
         if p.is_dir() {
@@ -252,9 +274,14 @@ struct RemoteEntry {
     last_modified: DateTime<Utc>,
 }
 
-fn parse_list_xml(xml: &str, prefix: &str) -> Result<Vec<RemoteEntry>, String> {
+struct ListPage {
+    entries: Vec<RemoteEntry>,
+    next_token: Option<String>,
+}
+
+fn parse_list_xml(xml: &str, prefix: &str) -> Result<ListPage, String> {
     // Tiny SAX-ish walk: just collect <Contents> blocks and read <Key>,
-    // <LastModified> children. Avoids serde XML mismatches.
+    // <LastModified> children, plus NextContinuationToken at the root.
     use quick_xml::events::Event;
     use quick_xml::Reader;
 
@@ -263,11 +290,11 @@ fn parse_list_xml(xml: &str, prefix: &str) -> Result<Vec<RemoteEntry>, String> {
     let mut buf = Vec::new();
 
     let mut out: Vec<RemoteEntry> = Vec::new();
+    let mut next_token: Option<String> = None;
     let mut in_contents = false;
     let mut current_tag: Option<String> = None;
     let mut cur_key: Option<String> = None;
     let mut cur_lm: Option<DateTime<Utc>> = None;
-    let mut truncated = false;
 
     loop {
         match reader.read_event_into(&mut buf) {
@@ -280,7 +307,7 @@ fn parse_list_xml(xml: &str, prefix: &str) -> Result<Vec<RemoteEntry>, String> {
                     cur_key = None;
                     cur_lm = None;
                 }
-                if in_contents || name == "IsTruncated" {
+                if in_contents || name == "IsTruncated" || name == "NextContinuationToken" {
                     current_tag = Some(name);
                 }
             }
@@ -288,13 +315,11 @@ fn parse_list_xml(xml: &str, prefix: &str) -> Result<Vec<RemoteEntry>, String> {
                 let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
                 if name == "Contents" {
                     if let (Some(k), Some(lm)) = (cur_key.take(), cur_lm.take()) {
-                        // Strip prefix to get vault-relative path
                         let rel = if !prefix.is_empty() && k.starts_with(prefix) {
                             k[prefix.len()..].trim_start_matches('/').to_string()
                         } else {
                             k.clone()
                         };
-                        // Skip "folder markers" (zero-byte keys ending in '/')
                         if !rel.is_empty() {
                             out.push(RemoteEntry {
                                 key: k,
@@ -320,8 +345,8 @@ fn parse_list_xml(xml: &str, prefix: &str) -> Result<Vec<RemoteEntry>, String> {
                                 .ok()
                                 .map(|t| t.with_timezone(&Utc));
                         }
-                        "IsTruncated" => {
-                            truncated = text == "true";
+                        "NextContinuationToken" => {
+                            next_token = Some(text);
                         }
                         _ => {}
                     }
@@ -331,12 +356,7 @@ fn parse_list_xml(xml: &str, prefix: &str) -> Result<Vec<RemoteEntry>, String> {
         }
         buf.clear();
     }
-    if truncated {
-        // We don't paginate yet; surface that as an error so the user
-        // knows their vault is bigger than one page (1000 keys).
-        return Err("Bucket has more than 1000 objects — pagination not yet implemented".into());
-    }
-    Ok(out)
+    Ok(ListPage { entries: out, next_token })
 }
 
 async fn list_objects(s3: &S3Settings) -> Result<Vec<RemoteEntry>, String> {
@@ -348,53 +368,69 @@ async fn list_objects(s3: &S3Settings) -> Result<Vec<RemoteEntry>, String> {
         prefix.trim_end_matches('/').to_string() + "/"
     };
 
-    // Query string (canonical form: sorted, percent-encoded values)
-    let mut query_pairs: Vec<(String, String)> = vec![
-        ("list-type".to_string(), "2".to_string()),
-    ];
-    if !prefix_for_strip.is_empty() {
-        query_pairs.push(("prefix".to_string(), prefix_for_strip.clone()));
-    }
-    query_pairs.sort_by(|a, b| a.0.cmp(&b.0));
-    let canonical_query: String = query_pairs
-        .iter()
-        .map(|(k, v)| format!("{}={}", urlencoding::encode(k), urlencoding::encode(v)))
-        .collect::<Vec<_>>()
-        .join("&");
-
     let canonical_uri = format!("/{}", s3.bucket);
-    let url = format!("{}{}?{}", base, canonical_uri, canonical_query);
-
-    let now = Utc::now();
-    let headers = sign(
-        "GET",
-        &host,
-        &canonical_uri,
-        &canonical_query,
-        b"",
-        &[],
-        &s3.region,
-        &s3.access_key_id,
-        &s3.secret_access_key,
-        now,
-    );
-
     let client = reqwest::Client::new();
-    let mut req = client.get(&url);
-    for (k, v) in &headers {
-        req = req.header(k, v);
+    let mut all: Vec<RemoteEntry> = Vec::new();
+    let mut continuation: Option<String> = None;
+
+    // Paginate until S3 stops handing back a NextContinuationToken.
+    // ListObjectsV2 caps at 1000 keys per response, so a vault with a
+    // few thousand objects (e.g. a `.git` folder full of loose objects)
+    // does several round-trips here.
+    loop {
+        let mut query_pairs: Vec<(String, String)> = vec![
+            ("list-type".to_string(), "2".to_string()),
+        ];
+        if !prefix_for_strip.is_empty() {
+            query_pairs.push(("prefix".to_string(), prefix_for_strip.clone()));
+        }
+        if let Some(tok) = continuation.as_ref() {
+            query_pairs.push(("continuation-token".to_string(), tok.clone()));
+        }
+        query_pairs.sort_by(|a, b| a.0.cmp(&b.0));
+        let canonical_query: String = query_pairs
+            .iter()
+            .map(|(k, v)| format!("{}={}", urlencoding::encode(k), urlencoding::encode(v)))
+            .collect::<Vec<_>>()
+            .join("&");
+        let url = format!("{}{}?{}", base, canonical_uri, canonical_query);
+
+        let now = Utc::now();
+        let headers = sign(
+            "GET",
+            &host,
+            &canonical_uri,
+            &canonical_query,
+            b"",
+            &[],
+            &s3.region,
+            &s3.access_key_id,
+            &s3.secret_access_key,
+            now,
+        );
+
+        let mut req = client.get(&url);
+        for (k, v) in &headers {
+            req = req.header(k, v);
+        }
+        let res = req.send().await.map_err(|e| format!("LIST request: {}", e))?;
+        let status = res.status();
+        let diag = diag_headers(&res);
+        let body = res.text().await.map_err(|e| format!("LIST body: {}", e))?;
+        if !status.is_success() {
+            return Err(format!(
+                "LIST {}{} → {}\n{}",
+                url, diag, status, snippet(&body, 1500)
+            ));
+        }
+        let page = parse_list_xml(&body, &prefix_for_strip)?;
+        all.extend(page.entries);
+        match page.next_token {
+            Some(tok) if !tok.is_empty() => continuation = Some(tok),
+            _ => break,
+        }
     }
-    let res = req.send().await.map_err(|e| format!("LIST request: {}", e))?;
-    let status = res.status();
-    let diag = diag_headers(&res);
-    let body = res.text().await.map_err(|e| format!("LIST body: {}", e))?;
-    if !status.is_success() {
-        return Err(format!(
-            "LIST {}{} → {}\n{}",
-            url, diag, status, snippet(&body, 1500)
-        ));
-    }
-    parse_list_xml(&body, &prefix_for_strip)
+    Ok(all)
 }
 
 // ─── S3 GET / PUT ──────────────────────────────────────────────────────────
@@ -483,6 +519,44 @@ async fn put_object(s3: &S3Settings, key: &str, body: Vec<u8>) -> Result<(), Str
     Ok(())
 }
 
+async fn delete_object(s3: &S3Settings, key: &str) -> Result<(), String> {
+    let (_, host, base) = parse_endpoint(&s3.endpoint)?;
+    let canonical_uri = format!("/{}/{}", s3.bucket, encode_key(key));
+    let url = format!("{}{}", base, canonical_uri);
+    let now = Utc::now();
+    let headers = sign(
+        "DELETE",
+        &host,
+        &canonical_uri,
+        "",
+        b"",
+        &[],
+        &s3.region,
+        &s3.access_key_id,
+        &s3.secret_access_key,
+        now,
+    );
+    let client = reqwest::Client::new();
+    let mut req = client.delete(&url);
+    for (k, v) in &headers {
+        req = req.header(k, v);
+    }
+    let res = req.send().await.map_err(|e| format!("DELETE request: {}", e))?;
+    let status = res.status();
+    let diag = diag_headers(&res);
+    // S3 returns 204 No Content on success, 404 if the key never existed.
+    // Treat 404 as success since the end state ("key not there") matches.
+    if !status.is_success() && status.as_u16() != 404 {
+        let body = res.text().await.unwrap_or_default();
+        return Err(format!(
+            "DELETE {}{} → {}\n{}",
+            url, diag, status,
+            snippet(&body, 1500)
+        ));
+    }
+    Ok(())
+}
+
 fn content_type_for(key: &str) -> &'static str {
     let lower = key.to_lowercase();
     if lower.ends_with(".md") {
@@ -551,11 +625,29 @@ pub async fn sync_vault(vault: String, s3: S3Settings) -> Result<SyncReport, Str
         local.iter().map(|e| (e.rel.clone(), e)).collect();
 
     // 2. Remote listing
-    let remote = list_objects(&s3).await?;
-    let remote_map: HashMap<String, &RemoteEntry> =
-        remote.iter().map(|e| (e.rel.clone(), e)).collect();
+    let remote_full = list_objects(&s3).await?;
 
     let mut report = SyncReport::default();
+
+    // 2a. Cleanup: drop any remote object whose vault-relative path
+    // crosses one of our excluded segments. Same blacklist used for the
+    // local walk — keeps `.git`, `node_modules`, OS junk, and our own
+    // `.mindmapper/` (creds!) out of the bucket regardless of how it
+    // got there.
+    let mut remote: Vec<RemoteEntry> = Vec::with_capacity(remote_full.len());
+    for entry in remote_full {
+        if is_excluded_rel(&entry.rel) {
+            match delete_object(&s3, &entry.key).await {
+                Ok(_) => report.deleted += 1,
+                Err(e) => report.errors.push(format!("delete {}: {}", entry.rel, e)),
+            }
+        } else {
+            remote.push(entry);
+        }
+    }
+
+    let remote_map: HashMap<String, &RemoteEntry> =
+        remote.iter().map(|e| (e.rel.clone(), e)).collect();
     let prefix = s3.prefix.clone().unwrap_or_default();
     let prefix_norm = if prefix.is_empty() {
         "".to_string()

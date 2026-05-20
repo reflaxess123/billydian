@@ -16,6 +16,7 @@ type SyncReport = {
   uploaded: number;
   downloaded: number;
   skipped: number;
+  deleted: number;
   errors: string[];
 };
 
@@ -260,6 +261,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     ↑ <strong>{syncReport.uploaded}</strong>
                     {"  ·  "}↓ <strong>{syncReport.downloaded}</strong>
                     {"  ·  "}= <strong>{syncReport.skipped}</strong>
+                    {syncReport.deleted > 0 && (
+                      <>{"  ·  "}🗑 <strong>{syncReport.deleted}</strong></>
+                    )}
                     {syncReport.errors.length > 0 && (
                       <>{"  ·  "}<span className="sync-feedback-err">⚠ {syncReport.errors.length}</span></>
                     )}
