@@ -856,24 +856,13 @@ html, body {
   resize: none;
   font-size: 14px;
   line-height: 1.7;
-  /* Roughly the viewport height minus titlebar + title-card + footer
-     + gaps. Edit-mode block then visually matches the preview block. */
-  min-height: calc(100vh - 320px);
-  scrollbar-color: color-mix(in srgb, var(--muted) 35%, transparent) transparent;
-}
-.note-textarea::-webkit-scrollbar { width: 10px; }
-.note-textarea::-webkit-scrollbar-track { background: transparent; }
-.note-textarea::-webkit-scrollbar-thumb {
-  background-color: color-mix(in srgb, var(--muted) 30%, transparent);
-  background-clip: padding-box;
-  border: 2px solid transparent;
-  border-radius: 99px;
-}
-.note-textarea::-webkit-scrollbar-thumb:hover {
-  background-color: var(--muted);
-}
-.dark .note-textarea::-webkit-scrollbar-thumb {
-  background-color: color-mix(in srgb, var(--muted) 45%, transparent);
+  /* No forced min-height. The textarea grows to fit its content — JS
+     in NoteEditor sets `height = scrollHeight` on every keystroke, and
+     Chromium ≥ 123 honours `field-sizing: content` natively as a
+     belt-and-braces hint. The outer .note-view becomes the scroll
+     surface, so the whole page scrolls instead of the textarea. */
+  field-sizing: content;
+  overflow: hidden;
 }
 .note-textarea.mono {
   font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", SFMono-Regular, Menlo, monospace;

@@ -52,6 +52,17 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(title);
   const titleInputRef = useRef<HTMLInputElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // Auto-grow the textarea to match its content height — no min, no
+  // internal scroll. The outer `.note-view` becomes the single scroll
+  // surface for the whole page.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [value, mode]);
 
   useEffect(() => {
     setValue(initialContent);
@@ -179,6 +190,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
         <div className="note-card note-content-card" style={cardStyle}>
           {mode === "edit" ? (
             <textarea
+              ref={textareaRef}
               className="note-textarea mono"
               value={value}
               onChange={(e) => setValue(e.target.value)}

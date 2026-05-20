@@ -1,18 +1,19 @@
-# MindMapper
+# BillyDian
 
-AI mind-map generator on top of OpenRouter. Type a topic, get an editable
-interactive tree; click any node to expand it further with the LLM of your
-choice; export to SVG or PNG.
+Vault-based notes + AI mind maps on top of OpenRouter. Pick a folder —
+`.md` files become rendered notes (with KaTeX math), `.mindmap` files
+become interactive trees. Edit Markdown inline, expand mind-map nodes
+with the LLM of your choice, regenerate a note's title from its body.
 
-Built with Tauri 2 + React 19 + d3-hierarchy.
+Built with Tauri 2 + React 19 + d3-hierarchy + react-markdown.
 
 ## Install
 
-Grab the latest `MindMapper_<version>_x64-setup.exe` from the
-[Releases](https://github.com/reflaxess123/mapper/releases) page and run it.
-Per-user install (no admin needed). Windows 10/11 x64.
+Grab the latest `BillyDian_<version>_x64-setup.exe` from the
+[Releases](https://github.com/reflaxess123/billydian/releases) page and
+run it. Per-user install (no admin needed). Windows 10/11 x64.
 
-You'll need an **OpenRouter API key** (paste it in the sidebar after launch
+You'll need an **OpenRouter API key** (paste it in Settings after launch
 — get one at [openrouter.ai](https://openrouter.ai)).
 
 ## Develop

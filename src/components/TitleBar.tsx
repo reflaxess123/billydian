@@ -24,7 +24,7 @@ export const TitleBar: React.FC = () => {
   return (
     <div className="drag-strip" data-tauri-drag-region>
       <span className="brand" data-tauri-drag-region>
-        <span className="brand-name">MindMapper</span>
+        <span className="brand-name">BillyDian</span>
         <span className="brand-by">by puzix</span>
       </span>
       <div className="win-controls">
