@@ -20,6 +20,14 @@ import { SettingsModal } from "./components/SettingsModal";
 import { Sparkles, AlertTriangle, X, FolderOpen } from "lucide-react";
 import "./App.css";
 
+export type SyncReport = {
+  uploaded: number;
+  downloaded: number;
+  skipped: number;
+  deleted: number;
+  errors: string[];
+};
+
 // ─── Vault-local config & token paths (inside <vault>/.billydian/) ────────
 const CONFIG_FILE = ".billydian/config.json";
 const TOKENS_FILE = ".billydian/tokens.json";
@@ -70,6 +78,9 @@ function App() {
   const [generatingNodeId, setGeneratingNodeId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncReport, setSyncReport] = useState<SyncReport | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   // ── Bootstrap: read vault pointer, then load settings + ledger + tree ──
   useEffect(() => {
@@ -623,6 +634,35 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openDoc, vaultPath, entries, ledger.byFile, refreshTree]);
 
+  // S3 readiness — all five fields filled + vault picked.
+  const s3Ready =
+    !!vaultPath &&
+    !!settings.s3.endpoint.trim() &&
+    !!settings.s3.region.trim() &&
+    !!settings.s3.bucket.trim() &&
+    !!settings.s3.accessKeyId.trim() &&
+    !!settings.s3.secretAccessKey.trim();
+
+  const handleSync = useCallback(async () => {
+    if (!vaultPath || !s3Ready || syncing) return;
+    setSyncing(true);
+    setSyncError(null);
+    setSyncReport(null);
+    try {
+      const report = await invoke<SyncReport>("sync_vault", {
+        vault: vaultPath,
+        s3: settings.s3,
+      });
+      setSyncReport(report);
+      // Refresh tree — newly-downloaded files need to show up.
+      await refreshTree(vaultPath);
+    } catch (e: any) {
+      setSyncError(String(e?.message || e || "Sync failed"));
+    } finally {
+      setSyncing(false);
+    }
+  }, [vaultPath, s3Ready, syncing, settings.s3, refreshTree]);
+
   // Derive a display title for the current note: basename without ext.
   const noteTitle = (() => {
     if (!openDoc || openDoc.kind !== "md") return "";
@@ -654,6 +694,12 @@ function App() {
         onCreateBlankNote={handleCreateBlankNote}
         isGenerating={isLoading}
         onOpenSettings={() => setSettingsOpen(true)}
+        onSync={handleSync}
+        s3Ready={s3Ready}
+        syncing={syncing}
+        syncReport={syncReport}
+        syncError={syncError}
+        onDismissSyncReport={() => { setSyncReport(null); setSyncError(null); }}
       />
 
       <div className="main-column">
@@ -747,7 +793,11 @@ function App() {
           onChange={updateSettings}
           onClose={() => setSettingsOpen(false)}
           onPickVault={handlePickVault}
-          onAfterSync={() => vaultPath && refreshTree(vaultPath)}
+          onSync={handleSync}
+          s3Ready={s3Ready}
+          syncing={syncing}
+          syncReport={syncReport}
+          syncError={syncError}
         />
       )}
     </div>

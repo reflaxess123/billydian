@@ -1,7 +1,7 @@
 import React, { useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { Eye, EyeOff, X, FolderOpen, Cpu, Key, Cloud, RefreshCw, CheckCircle2, AlertTriangle } from "lucide-react";
 import { AppSettings } from "../types";
+import { SyncReport } from "../App";
 
 interface SettingsModalProps {
   settings: AppSettings;
@@ -9,16 +9,12 @@ interface SettingsModalProps {
   onChange: (next: AppSettings) => void;
   onClose: () => void;
   onPickVault: () => void;
-  onAfterSync?: () => void;
+  onSync: () => void;
+  s3Ready: boolean;
+  syncing: boolean;
+  syncReport: SyncReport | null;
+  syncError: string | null;
 }
-
-type SyncReport = {
-  uploaded: number;
-  downloaded: number;
-  skipped: number;
-  deleted: number;
-  errors: string[];
-};
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   settings,
@@ -26,43 +22,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onChange,
   onClose,
   onPickVault,
-  onAfterSync,
+  onSync,
+  s3Ready,
+  syncing,
+  syncReport,
+  syncError,
 }) => {
   const [showKey, setShowKey] = useState(false);
   const [showS3Secret, setShowS3Secret] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [syncReport, setSyncReport] = useState<SyncReport | null>(null);
-  const [syncError, setSyncError] = useState<string | null>(null);
 
   const setS3 = (patch: Partial<AppSettings["s3"]>) => {
     onChange({ ...settings, s3: { ...settings.s3, ...patch } });
-  };
-
-  const s3Ready =
-    !!vaultPath &&
-    !!settings.s3.endpoint.trim() &&
-    !!settings.s3.region.trim() &&
-    !!settings.s3.bucket.trim() &&
-    !!settings.s3.accessKeyId.trim() &&
-    !!settings.s3.secretAccessKey.trim();
-
-  const handleSync = async () => {
-    if (!vaultPath) return;
-    setSyncing(true);
-    setSyncError(null);
-    setSyncReport(null);
-    try {
-      const report = await invoke<SyncReport>("sync_vault", {
-        vault: vaultPath,
-        s3: settings.s3,
-      });
-      setSyncReport(report);
-      onAfterSync?.();
-    } catch (e: any) {
-      setSyncError(String(e?.message || e || "Sync failed"));
-    } finally {
-      setSyncing(false);
-    }
   };
 
   return (
@@ -241,7 +211,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <button
                 type="button"
                 className="modal-btn primary"
-                onClick={handleSync}
+                onClick={onSync}
                 disabled={!s3Ready || syncing}
                 title={
                   !vaultPath

@@ -234,6 +234,73 @@ html, body {
   transform: rotate(20deg);
 }
 
+/* Sync feedback chip — sits under the top row of the sidebar. */
+.sidebar-sync-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 6px 10px;
+  border-radius: var(--radius-sm);
+  font: 500 11px / 1.2 inherit;
+  animation: syncChipIn 0.2s var(--ease-out);
+}
+@keyframes syncChipIn {
+  from { opacity: 0; transform: translateY(-3px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.sidebar-sync-chip.busy {
+  background: var(--surface);
+  color: var(--muted);
+}
+.sidebar-sync-chip.ok {
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  color: var(--fg);
+}
+.sidebar-sync-chip.err {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+.sidebar-sync-stats {
+  flex: 1 1 auto;
+  font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+.sidebar-sync-stats strong {
+  color: var(--fg);
+  font-weight: 700;
+  margin: 0 1px;
+}
+.sidebar-sync-chip.ok svg:first-child,
+.sidebar-sync-chip.busy svg:first-child { color: var(--muted); }
+.sidebar-sync-err { color: var(--danger); font-weight: 700; }
+.sidebar-sync-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-sync-x {
+  appearance: none;
+  width: 18px; height: 18px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.6;
+  flex-shrink: 0;
+  transition: opacity 0.12s var(--ease-out), background 0.12s var(--ease-out);
+}
+.sidebar-sync-x:hover { opacity: 1; background: rgba(0,0,0,0.06); }
+.dark .sidebar-sync-x:hover { background: rgba(255,255,255,0.08); }
+
 /* Vault picker chip */
 .vault-pick-btn {
   appearance: none;
