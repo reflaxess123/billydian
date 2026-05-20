@@ -71,6 +71,7 @@ async function readOpt(vault: string, rel: string): Promise<string | null> {
 
 function App() {
   const [vaultPath, setVaultPath] = useState<string | null>(null);
+  const [knownVaults, setKnownVaults] = useState<string[]>([]);
   const [settings, setSettings] = useState<AppSettings>({ ...DEFAULT_SETTINGS });
   const [ledger, setLedger] = useState<TokenLedger>(EMPTY_LEDGER);
   const [entries, setEntries] = useState<VaultEntry[]>([]);
@@ -87,15 +88,29 @@ function App() {
   useEffect(() => {
     (async () => {
       try {
-        const path = await tauriGetVaultPath();
-        if (path) {
-          await activateVault(path);
+        const state = await invoke<{ vaults: string[]; active: string | null }>(
+          "get_known_vaults",
+        );
+        setKnownVaults(state.vaults);
+        if (state.active) {
+          await activateVault(state.active);
         }
       } catch (e) {
         console.error("vault bootstrap failed", e);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const refreshKnownVaults = useCallback(async () => {
+    try {
+      const state = await invoke<{ vaults: string[]; active: string | null }>(
+        "get_known_vaults",
+      );
+      setKnownVaults(state.vaults);
+    } catch (e) {
+      console.error("refreshKnownVaults:", e);
+    }
   }, []);
 
   // ── Theme class ───────────────────────────────────────────────────────
@@ -164,6 +179,8 @@ function App() {
     await tauriSetVaultPath(path);
     setVaultPath(path);
     setOpenDoc(null);
+    // Refresh the known list — first-time activation adds this vault.
+    await refreshKnownVaults();
 
     // Load settings (or fall back to defaults & write them on first run)
     const cfg = await readOpt(path, CONFIG_FILE);
@@ -194,6 +211,29 @@ function App() {
 
     await refreshTree(path);
   }, [refreshTree]);
+
+  const handleRemoveVault = useCallback(async (path: string) => {
+    try {
+      const state = await invoke<{ vaults: string[]; active: string | null }>(
+        "remove_vault",
+        { path },
+      );
+      setKnownVaults(state.vaults);
+      // If we removed the active vault, switch to the next one (or
+      // clear the workspace if none left).
+      if (vaultPath === path) {
+        if (state.active) {
+          await activateVault(state.active);
+        } else {
+          setVaultPath(null);
+          setOpenDoc(null);
+          setEntries([]);
+        }
+      }
+    } catch (e: any) {
+      setError(`Could not remove vault: ${e?.message || e}`);
+    }
+  }, [vaultPath, activateVault]);
 
   const handlePickVault = useCallback(async () => {
     try {
@@ -723,7 +763,10 @@ function App() {
         settings={settings}
         onSettingsChange={updateSettings}
         vaultPath={vaultPath}
+        knownVaults={knownVaults}
         onPickVault={handlePickVault}
+        onActivateVault={(p) => activateVault(p)}
+        onRemoveVault={handleRemoveVault}
         entries={entries}
         activePath={openDoc?.relPath ?? null}
         onOpenFile={handleOpenFile}

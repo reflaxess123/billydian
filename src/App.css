@@ -318,6 +318,9 @@ html, body {
   margin: 0;
   padding: 0;
 }
+/* vault-row hosts the dropdown menu inside its layout so that
+   `position: absolute` on the menu anchors to it. */
+.vault-row { position: relative; }
 .vault-row .vault-pick-btn,
 .gen-input-row > .api-input {
   width: 100%;
@@ -357,11 +360,117 @@ html, body {
 }
 .vault-pick-btn:hover { background: var(--hover); }
 .vault-pick-label {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .vault-pick-btn svg { color: var(--muted); flex-shrink: 0; }
+.vault-pick-chev {
+  transition: transform 0.18s var(--ease-out);
+}
+.vault-pick-chev.open { transform: rotate(180deg); }
+.vault-pick-btn.open { background: var(--hover); }
+
+/* Vault picker dropdown — absolutely positioned right below the
+   vault-row, full width matched to the chip. Animates in with the
+   same `ddIn` rhythm used for the model dropdown. */
+.vault-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop);
+  animation: vaultMenuIn 0.16s var(--ease-out);
+  max-height: 280px;
+  overflow-y: auto;
+}
+@keyframes vaultMenuIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.vault-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  user-select: none;
+  color: var(--fg);
+  transition: background 0.12s var(--ease-out);
+  min-width: 0;
+}
+.vault-menu-item:hover { background: var(--hover); }
+.vault-menu-item.active { background: var(--accent-soft); }
+.vault-menu-icon { color: var(--muted); flex-shrink: 0; }
+.vault-menu-item.active .vault-menu-icon { color: var(--accent); }
+.vault-menu-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow: hidden;
+}
+.vault-menu-name {
+  font: 600 var(--text-xs) / 1 inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vault-menu-path {
+  font: 500 10px / 1.1 inherit;
+  font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", SFMono-Regular, Menlo, monospace;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vault-menu-check { color: var(--accent); flex-shrink: 0; }
+.vault-menu-remove {
+  appearance: none;
+  width: 20px; height: 20px;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.12s var(--ease-out), background 0.12s var(--ease-out), color 0.12s var(--ease-out);
+}
+.vault-menu-item:hover .vault-menu-remove { opacity: 1; }
+.vault-menu-remove:hover { background: var(--danger); color: #fff; }
+
+.vault-menu-add {
+  appearance: none;
+  margin-top: 4px;
+  padding: 8px 10px;
+  background: var(--surface);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  font: 600 var(--text-xs) / 1 inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 0.12s var(--ease-out);
+}
+.vault-menu-add:hover { background: var(--hover); }
+.vault-menu-add svg { color: var(--muted); }
 
 /* Mind-map generator — single input + AI sparkle, no kind toggle */
 .gen-input-row { display: flex; gap: 4px; align-items: stretch; }

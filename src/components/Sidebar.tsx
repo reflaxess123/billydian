@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Sun,
   Moon,
@@ -9,6 +9,9 @@ import {
   ZoomIn,
   ZoomOut,
   RefreshCw,
+  Check,
+  X,
+  ChevronDown,
 } from "lucide-react";
 import { AppSettings, VaultEntry } from "../types";
 import { SyncReport } from "../App";
@@ -20,7 +23,10 @@ interface SidebarProps {
   settings: AppSettings;
   onSettingsChange: (s: AppSettings) => void;
   vaultPath: string | null;
+  knownVaults: string[];
   onPickVault: () => void;
+  onActivateVault: (path: string) => void;
+  onRemoveVault: (path: string) => void;
   entries: VaultEntry[];
   activePath: string | null;
   onOpenFile: (entry: VaultEntry) => void;
@@ -46,7 +52,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   settings,
   onSettingsChange,
   vaultPath,
+  knownVaults,
   onPickVault,
+  onActivateVault,
+  onRemoveVault,
   entries,
   activePath,
   onOpenFile,
@@ -65,6 +74,38 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // The AI generator now only produces mind maps; plain notes are
   // created via the `+` button next to the vault chip.
   const GEN_KIND: NewKind = "mindmap";
+
+  // Vault picker dropdown — opens on chip click when there's at least
+  // one known vault, lets the user switch between them or add new.
+  const [vaultMenuOpen, setVaultMenuOpen] = useState(false);
+  const vaultMenuRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!vaultMenuOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (
+        vaultMenuRef.current &&
+        !vaultMenuRef.current.contains(e.target as Node)
+      ) {
+        setVaultMenuOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setVaultMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onClick, true);
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("mousedown", onClick, true);
+      document.removeEventListener("keydown", onKey, true);
+    };
+  }, [vaultMenuOpen]);
+
+  const basename = (p: string) => p.split(/[\\/]/).slice(-1)[0] || p;
+  const handleVaultClick = () => {
+    // First-time use (no known vaults): jump straight to the OS dialog.
+    if (knownVaults.length === 0) onPickVault();
+    else setVaultMenuOpen((v) => !v);
+  };
 
   const toggleTheme = () => {
     onSettingsChange({
@@ -170,17 +211,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        {/* Vault row: picker chip + new-note `+` to its right */}
-        <div className="vault-row">
+        {/* Vault row: picker chip + new-note `+` to its right.
+            The chip is a dropdown trigger when known vaults exist —
+            shows the list with Active marker, remove × per row, and
+            "Add another…" at the bottom. */}
+        <div className="vault-row" ref={vaultMenuRef}>
           <button
-            className="vault-pick-btn"
-            onClick={onPickVault}
+            className={`vault-pick-btn${vaultMenuOpen ? " open" : ""}`}
+            onClick={handleVaultClick}
             title={vaultPath ?? "Pick a vault folder"}
           >
             <FolderOpen size={14} />
             <span className="vault-pick-label">
-              {vaultPath ? vaultPath.split(/[\\/]/).slice(-1)[0] : "Pick vault…"}
+              {vaultPath ? basename(vaultPath) : "Pick vault…"}
             </span>
+            {knownVaults.length > 0 && (
+              <ChevronDown
+                size={13}
+                className={`vault-pick-chev${vaultMenuOpen ? " open" : ""}`}
+              />
+            )}
           </button>
           {vaultPath && (
             <button
@@ -192,6 +242,57 @@ export const Sidebar: React.FC<SidebarProps> = ({
             >
               <Plus size={14} />
             </button>
+          )}
+
+          {vaultMenuOpen && (
+            <div className="vault-menu" role="listbox">
+              {knownVaults.map((p) => {
+                const active = p === vaultPath;
+                return (
+                  <div
+                    key={p}
+                    className={`vault-menu-item${active ? " active" : ""}`}
+                    role="option"
+                    aria-selected={active}
+                    onClick={() => {
+                      if (!active) onActivateVault(p);
+                      setVaultMenuOpen(false);
+                    }}
+                  >
+                    <FolderOpen size={13} className="vault-menu-icon" />
+                    <span className="vault-menu-text" title={p}>
+                      <span className="vault-menu-name">{basename(p)}</span>
+                      <span className="vault-menu-path">{p}</span>
+                    </span>
+                    {active && <Check size={13} className="vault-menu-check" />}
+                    {!active && (
+                      <button
+                        type="button"
+                        className="vault-menu-remove"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onRemoveVault(p);
+                        }}
+                        title="Forget this vault"
+                        aria-label="Forget this vault"
+                      >
+                        <X size={11} />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+              <button
+                type="button"
+                className="vault-menu-add"
+                onClick={() => {
+                  setVaultMenuOpen(false);
+                  onPickVault();
+                }}
+              >
+                <Plus size={13} /> Add another vault…
+              </button>
+            </div>
           )}
         </div>
 
