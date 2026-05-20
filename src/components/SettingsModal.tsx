@@ -1,14 +1,12 @@
 import React, { useState } from "react";
-import { Eye, EyeOff, X, FolderOpen, Cpu, Key, Cloud, RefreshCw, CheckCircle2, AlertTriangle } from "lucide-react";
+import { Eye, EyeOff, X, Cpu, Key, Cloud, RefreshCw, CheckCircle2, AlertTriangle } from "lucide-react";
 import { AppSettings } from "../types";
 import { SyncReport } from "../App";
 
 interface SettingsModalProps {
   settings: AppSettings;
-  vaultPath: string | null;
   onChange: (next: AppSettings) => void;
   onClose: () => void;
-  onPickVault: () => void;
   onSync: () => void;
   s3Ready: boolean;
   syncing: boolean;
@@ -18,10 +16,8 @@ interface SettingsModalProps {
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   settings,
-  vaultPath,
   onChange,
   onClose,
-  onPickVault,
   onSync,
   s3Ready,
   syncing,
@@ -61,20 +57,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         <div className="modal-body">
-          {/* Vault */}
-          <section className="modal-section">
-            <h3>
-              <FolderOpen size={14} /> Vault folder
-            </h3>
-            <div className="modal-row">
-              <code className="modal-path" title={vaultPath ?? ""}>
-                {vaultPath ?? "No vault selected"}
-              </code>
-              <button className="modal-btn" onClick={onPickVault}>
-                Change…
-              </button>
-            </div>
-          </section>
+          {/* Vault folder section removed — the sidebar's vault-row
+              dropdown is now the single way to pick / switch / forget
+              vaults, so showing the path twice was redundant. */}
 
           {/* OpenRouter */}
           <section className="modal-section">

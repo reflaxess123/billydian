@@ -875,10 +875,8 @@ function App() {
       {settingsOpen && (
         <SettingsModal
           settings={settings}
-          vaultPath={vaultPath}
           onChange={updateSettings}
           onClose={() => setSettingsOpen(false)}
-          onPickVault={handlePickVault}
           onSync={handleSync}
           s3Ready={s3Ready}
           syncing={syncing}
