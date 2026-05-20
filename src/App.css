@@ -734,40 +734,43 @@ html, body {
   flex-direction: column;
   gap: 4px;
 }
-.note-title-eyebrow {
-  font: 700 10px / 1 inherit;
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  color: var(--muted);
-}
-.note-title {
-  font: 800 24px / 1.15 inherit;
-  letter-spacing: -0.5px;
-  color: var(--fg);
-  margin: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  cursor: text;
-}
-/* `.note-title-input` is the inline editor that swaps in when the user
-   clicks the h1. The whole point: it must be visually indistinguishable
-   from the heading — no border, no underline, no padding, same font.
-   Browser-default input chrome is reset back to baseline. */
+/* Title h1 and its inline-edit input share an identical type stack via
+   longhand props, because the `font:` shorthand inherits unevenly
+   between heading and input elements. The swap must be seamless. */
+.note-title,
 .note-title-input {
-  appearance: none;
+  display: block;
   width: 100%;
+  margin: 0;
+  padding: 0;
   background: transparent;
   border: none;
   outline: none;
-  padding: 0;
-  margin: 0;
-  font: 800 24px / 1.15 inherit;
+  box-shadow: none;
+  border-radius: 0;
+  font-family: inherit;
+  font-size: 24px;
+  font-weight: 800;
+  font-style: normal;
+  font-variant: normal;
+  line-height: 1.15;
   letter-spacing: -0.5px;
   color: var(--fg);
-  border-radius: 0;
-  box-shadow: none;
+  text-rendering: inherit;
+  -webkit-font-smoothing: inherit;
   cursor: text;
+}
+/* h1-only finishing touches that don't apply to input */
+.note-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.note-title-input {
+  /* Reset every UA-specific input affordance that could leak through */
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
 }
 .note-title-input::selection {
   background: var(--accent-soft);

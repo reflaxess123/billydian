@@ -118,7 +118,6 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
         {/* Title card */}
         <header className="note-card note-title-card" style={cardStyle}>
           <div className="note-title-block">
-            <span className="note-title-eyebrow">Note</span>
             {editingTitle ? (
               <input
                 ref={titleInputRef}
