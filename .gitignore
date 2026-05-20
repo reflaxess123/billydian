@@ -29,3 +29,6 @@ dist-ssr
 # Tauri build outputs
 src-tauri/target/
 src-tauri/gen/schemas/
+# Screenshots accidentally dropped in repo root
+/[0-9]*.png
+
