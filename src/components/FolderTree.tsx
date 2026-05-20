@@ -116,19 +116,25 @@ const TreeRow: React.FC<TreeRowProps> = ({
           </button>
         )}
       </div>
-      {entry.kind === "dir" && open && entry.children && entry.children.length > 0 && (
-        <>
-          {entry.children.map((child) => (
-            <TreeRow
-              key={child.path}
-              entry={child}
-              depth={depth + 1}
-              activePath={activePath}
-              onOpen={onOpen}
-              onDelete={onDelete}
-            />
-          ))}
-        </>
+      {entry.kind === "dir" && entry.children && entry.children.length > 0 && (
+        // Grid-row trick: animate `grid-template-rows: 0fr → 1fr` so the
+        // children area expands to its content's natural height with a
+        // CSS transition. Inner wrapper has `overflow: hidden` so child
+        // rows are clipped while collapsed.
+        <div className={`tree-children-wrap${open ? " open" : ""}`}>
+          <div className="tree-children-inner">
+            {entry.children.map((child) => (
+              <TreeRow
+                key={child.path}
+                entry={child}
+                depth={depth + 1}
+                activePath={activePath}
+                onOpen={onOpen}
+                onDelete={onDelete}
+              />
+            ))}
+          </div>
+        </div>
       )}
     </>
   );

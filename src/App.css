@@ -299,17 +299,26 @@ html, body {
   text-overflow: ellipsis;
 }
 
-/* Vault row: picker chip + `+` new-note button glued to its right. */
-.vault-row {
+/* Vault row + gen-input row share the same horizontal layout so the
+   sidebar reads as one consistent stack: stretch-tall siblings, fixed
+   36px square trailing button, identical 6px gap. */
+.vault-row,
+.gen-input-row {
   display: flex;
   align-items: stretch;
-  gap: 4px;
+  gap: 6px;
 }
-.vault-row .vault-pick-btn { flex: 1 1 auto; min-width: 0; }
+.vault-row .vault-pick-btn,
+.gen-input-row > .api-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 36px;
+}
 .vault-new-btn {
   appearance: none;
   flex-shrink: 0;
-  width: 32px;
+  width: 36px;
+  height: 36px;
   background: var(--surface);
   border: none;
   border-radius: var(--radius-sm);
@@ -425,10 +434,32 @@ html, body {
 .tree-chev {
   flex-shrink: 0;
   color: var(--muted);
-  transition: transform 0.15s var(--ease-out);
+  transition: transform 0.18s var(--ease-out);
 }
 .tree-chev.open { transform: rotate(90deg); }
 .tree-chev-spacer { width: 12px; flex-shrink: 0; }
+
+/* Expand / collapse animation for a directory's children. The
+   `grid-template-rows: 0fr → 1fr` trick lets us transition between
+   "no height" and "auto height" without ever spelling out a fixed
+   pixel value, so big folders and small folders animate the same
+   way. */
+.tree-children-wrap {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 0.22s var(--ease-out),
+    opacity 0.18s var(--ease-out);
+}
+.tree-children-wrap.open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.tree-children-inner {
+  overflow: hidden;
+  min-height: 0;
+}
 
 .tree-icon { display: inline-flex; flex-shrink: 0; color: var(--muted); }
 .tree-row.active .tree-icon { color: var(--accent-fg); }
