@@ -20,9 +20,9 @@ import { SettingsModal } from "./components/SettingsModal";
 import { Sparkles, AlertTriangle, X, FolderOpen } from "lucide-react";
 import "./App.css";
 
-// ─── Vault-local config & token paths (inside <vault>/.mindmapper/) ───────
-const CONFIG_FILE = ".mindmapper/config.json";
-const TOKENS_FILE = ".mindmapper/tokens.json";
+// ─── Vault-local config & token paths (inside <vault>/.billydian/) ────────
+const CONFIG_FILE = ".billydian/config.json";
+const TOKENS_FILE = ".billydian/tokens.json";
 
 // ─── Tauri command wrappers ───────────────────────────────────────────────
 type GenResponse = {
@@ -688,7 +688,7 @@ function App() {
                   Pick a folder to use as your vault. All your notes and mind
                   maps live there as plain files — <code>.md</code> for notes,{" "}
                   <code>.mindmap</code> for trees. Settings sit in a hidden
-                  <code> .mindmapper/ </code>subfolder.
+                  <code> .billydian/ </code>subfolder.
                 </p>
                 <button className="welcome-submit-btn" onClick={handlePickVault}>
                   <FolderOpen size={16} /> Choose vault folder

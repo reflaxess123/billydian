@@ -181,7 +181,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   className="api-input mono"
                   value={settings.s3.bucket}
                   onChange={(e) => setS3({ bucket: e.target.value })}
-                  placeholder="mindmapper-vault"
+                  placeholder="billydian-vault"
                   spellCheck={false}
                   autoComplete="off"
                 />
@@ -234,7 +234,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <p className="settings-tip">
               Two-way diff sync: walks your vault, lists the bucket, and
               push/pull whatever side is newer. Files inside
-              <code> .mindmapper/ </code>are excluded so your creds never
+              <code> .billydian/ </code>are excluded so your creds never
               travel.
             </p>
             <div className="modal-row">

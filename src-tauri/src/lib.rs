@@ -2,12 +2,15 @@
 //
 // Storage model (Obsidian-style):
 //   <vault>/
-//     .mindmapper/
+//     .billydian/
 //       config.json     # app settings (api key, model, s3, theme)
 //       tokens.json     # per-file token usage tracking
 //     foo.md            # markdown notes
 //     bar.mindmap       # mind-map JSON (custom extension)
 //     Subfolder/...
+//
+// Older builds called the config folder `.mindmapper/`; `set_vault_path`
+// transparently renames any legacy folder it finds.
 //
 // The frontend picks/changes the vault folder via the dialog plugin and
 // stores the path in `<config_dir>/mindmapper/vault.json` so we remember
@@ -250,13 +253,22 @@ fn get_vault_path(app: tauri::AppHandle) -> Result<Option<String>, String> {
 
 #[tauri::command]
 fn set_vault_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
-    // Make sure the chosen directory exists and is a dir
     let p = PathBuf::from(&path);
     if !p.is_dir() {
         return Err(format!("Not a directory: {}", path));
     }
-    // Create .mindmapper subfolder eagerly so settings have somewhere to live
-    let cfg_dir = p.join(".mindmapper");
+
+    // One-time migration: older builds stored settings in `.mindmapper/`.
+    // If that folder exists and the new `.billydian/` doesn't, hand the
+    // whole tree over. No data loss, no manual move on the user's part.
+    let legacy = p.join(".mindmapper");
+    let cfg_dir = p.join(".billydian");
+    if legacy.is_dir() && !cfg_dir.exists() {
+        fs::rename(&legacy, &cfg_dir)
+            .map_err(|e| format!("Could not migrate .mindmapper → .billydian: {}", e))?;
+    }
+
+    // Create config dir eagerly so settings have somewhere to land
     fs::create_dir_all(&cfg_dir).map_err(|e| e.to_string())?;
 
     let ptr = vault_pointer_path(&app)?;

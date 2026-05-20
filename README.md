@@ -16,7 +16,7 @@ Built with Tauri 2 + React 19 + d3-hierarchy + react-markdown.
 ## Features
 
 - **Vault model.** Pick a folder; everything lives there as plain
-  `.md` and `.mindmap` files plus a hidden `.mindmapper/` for settings.
+  `.md` and `.mindmap` files plus a hidden `.billydian/` for settings.
   No proprietary DB.
 - **AI generation.** Type a topic, get a full markdown note **or** a
   hierarchical mind map. Pick any OpenRouter model — type the slug
@@ -33,7 +33,7 @@ Built with Tauri 2 + React 19 + d3-hierarchy + react-markdown.
   cluttering the sidebar.
 - **Smart S3 sync.** Two-way diff sync against any S3-compatible
   endpoint (AWS / MinIO / Cloudflare R2). Push/pull whichever side is
-  newer, file by file. `.mindmapper/` is excluded so your creds never
+  newer, file by file. `.billydian/` is excluded so your creds never
   travel with the vault.
 - **Frameless, themed, rebuilt-after-flov.** Rounded-card window,
   custom titlebar with min/max/close, dark + light themes, UI zoom

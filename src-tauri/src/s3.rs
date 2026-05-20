@@ -3,7 +3,7 @@
 // hand-rolled SigV4 implementation and parse ListObjectsV2 XML directly.
 //
 // Sync strategy (two-way, mtime wins):
-//   - Walk the vault, collect rel paths + mtimes. `.mindmapper/` is
+//   - Walk the vault, collect rel paths + mtimes. `.billydian/` is
 //     excluded so secrets never travel.
 //   - ListObjectsV2 the bucket under <prefix>, collect keys +
 //     last-modified.
@@ -52,14 +52,17 @@ pub struct SyncReport {
     pub errors: Vec<String>,
 }
 
-/// Path segments we never sync. `.mindmapper` holds our settings + s3
-/// creds; `.git`/`.svn`/`.hg` are tool junk; `node_modules` is huge and
-/// regeneratable. The OS-specific cache files at the bottom are obvious.
+/// Path segments we never sync. `.billydian` holds our settings + s3
+/// creds (`.mindmapper` kept as the legacy name in case an old vault
+/// still has one around); `.git`/`.svn`/`.hg` are tool junk;
+/// `node_modules` is huge and regeneratable. The OS-specific cache
+/// files at the bottom are obvious.
 ///
 /// During sync, anything that matches this list is:
 ///   - skipped locally (we don't upload it), AND
 ///   - actively deleted on the remote side if it's already there.
 const EXCLUDED_SEGMENTS: &[&str] = &[
+    ".billydian",
     ".mindmapper",
     ".git",
     ".svn",
@@ -632,7 +635,7 @@ pub async fn sync_vault(vault: String, s3: S3Settings) -> Result<SyncReport, Str
     // 2a. Cleanup: drop any remote object whose vault-relative path
     // crosses one of our excluded segments. Same blacklist used for the
     // local walk — keeps `.git`, `node_modules`, OS junk, and our own
-    // `.mindmapper/` (creds!) out of the bucket regardless of how it
+    // `.billydian/` (creds!) out of the bucket regardless of how it
     // got there.
     let mut remote: Vec<RemoteEntry> = Vec::with_capacity(remote_full.len());
     for entry in remote_full {

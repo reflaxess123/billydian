@@ -54,8 +54,9 @@ const TreeRow: React.FC<TreeRowProps> = ({
   onOpen,
   onDelete,
 }) => {
-  // All folders start collapsed by default — opening a fresh vault
-  // shouldn't paint the whole tree at once.
+  // All folders (including the config `.billydian/`) start collapsed
+  // by default — opening a fresh vault shouldn't paint the whole tree
+  // at once.
   const [open, setOpen] = useState(false);
   const isActive = activePath === entry.path && entry.kind !== "dir";
 

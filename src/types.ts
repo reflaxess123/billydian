@@ -53,7 +53,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   noteWidth: 760,
 };
 
-// Token usage tracking. Stored in <vault>/.mindmapper/tokens.json:
+// Token usage tracking. Stored in <vault>/.billydian/tokens.json:
 //   { "all": TokenStats, "byFile": { [relPath]: TokenStats } }
 // The all-time counter only grows; per-file counters are wiped when
 // the file is deleted.
