@@ -747,6 +747,7 @@ function App() {
           onChange={updateSettings}
           onClose={() => setSettingsOpen(false)}
           onPickVault={handlePickVault}
+          onAfterSync={() => vaultPath && refreshTree(vaultPath)}
         />
       )}
     </div>

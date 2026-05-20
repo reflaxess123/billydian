@@ -622,8 +622,72 @@ html, body {
   transition: background 0.12s var(--ease-out);
 }
 .modal-btn:hover { background: var(--hover); }
-.modal-btn.primary { background: var(--accent); color: var(--accent-fg); }
-.modal-btn.primary:hover { filter: brightness(1.05); background: var(--accent); }
+.modal-btn.primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.modal-btn.primary:hover:not(:disabled) { filter: brightness(1.05); background: var(--accent); }
+.modal-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: none;
+}
+
+/* Spinning icon for in-progress states */
+.spin { animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* S3 sync feedback row */
+.sync-feedback {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 500 var(--text-xs) / 1.3 inherit;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--muted);
+}
+.sync-feedback strong {
+  color: var(--fg);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.sync-feedback.ok { color: var(--muted); }
+.sync-feedback.ok svg { color: var(--ok); }
+.sync-feedback.err {
+  background: color-mix(in srgb, var(--danger) 12%, var(--bg-elevated));
+  color: var(--danger);
+}
+.sync-feedback.err svg { flex-shrink: 0; }
+.sync-feedback-err { color: var(--danger); font-weight: 700; }
+
+.sync-errors {
+  font-size: var(--text-xs);
+  color: var(--danger);
+  margin-top: 6px;
+}
+.sync-errors summary {
+  cursor: pointer;
+  user-select: none;
+  font-weight: 600;
+}
+.sync-errors ul {
+  margin: 6px 0 0;
+  padding-left: 20px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.sync-errors li {
+  font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--danger);
+  word-break: break-all;
+}
 
 .grid-2 {
   display: grid;

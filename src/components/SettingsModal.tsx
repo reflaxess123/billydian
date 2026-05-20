@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { Eye, EyeOff, X, FolderOpen, Cpu, Key, Cloud } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
+import { Eye, EyeOff, X, FolderOpen, Cpu, Key, Cloud, RefreshCw, CheckCircle2, AlertTriangle } from "lucide-react";
 import { AppSettings } from "../types";
 
 interface SettingsModalProps {
@@ -8,7 +9,15 @@ interface SettingsModalProps {
   onChange: (next: AppSettings) => void;
   onClose: () => void;
   onPickVault: () => void;
+  onAfterSync?: () => void;
 }
+
+type SyncReport = {
+  uploaded: number;
+  downloaded: number;
+  skipped: number;
+  errors: string[];
+};
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   settings,
@@ -16,12 +25,43 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onChange,
   onClose,
   onPickVault,
+  onAfterSync,
 }) => {
   const [showKey, setShowKey] = useState(false);
   const [showS3Secret, setShowS3Secret] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncReport, setSyncReport] = useState<SyncReport | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   const setS3 = (patch: Partial<AppSettings["s3"]>) => {
     onChange({ ...settings, s3: { ...settings.s3, ...patch } });
+  };
+
+  const s3Ready =
+    !!vaultPath &&
+    !!settings.s3.endpoint.trim() &&
+    !!settings.s3.region.trim() &&
+    !!settings.s3.bucket.trim() &&
+    !!settings.s3.accessKeyId.trim() &&
+    !!settings.s3.secretAccessKey.trim();
+
+  const handleSync = async () => {
+    if (!vaultPath) return;
+    setSyncing(true);
+    setSyncError(null);
+    setSyncReport(null);
+    try {
+      const report = await invoke<SyncReport>("sync_vault", {
+        vault: vaultPath,
+        s3: settings.s3,
+      });
+      setSyncReport(report);
+      onAfterSync?.();
+    } catch (e: any) {
+      setSyncError(String(e?.message || e || "Sync failed"));
+    } finally {
+      setSyncing(false);
+    }
   };
 
   return (
@@ -106,11 +146,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </p>
           </section>
 
-          {/* S3 sync (skeleton — actual sync lands in next phase) */}
+          {/* S3 sync */}
           <section className="modal-section">
             <h3>
               <Cloud size={14} /> S3 sync
-              <span className="phase-badge">soon</span>
             </h3>
             <div className="grid-2">
               <label className="field">
@@ -192,9 +231,58 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </label>
             </div>
             <p className="settings-tip">
-              Smart sync (diff-based push/pull) will land in the next update;
-              settings are stored now so you can fill them in early.
+              Two-way diff sync: walks your vault, lists the bucket, and
+              push/pull whatever side is newer. Files inside
+              <code> .mindmapper/ </code>are excluded so your creds never
+              travel.
             </p>
+            <div className="modal-row">
+              <button
+                type="button"
+                className="modal-btn primary"
+                onClick={handleSync}
+                disabled={!s3Ready || syncing}
+                title={
+                  !vaultPath
+                    ? "Pick a vault first"
+                    : !s3Ready
+                    ? "Fill all S3 fields above"
+                    : "Sync now"
+                }
+              >
+                <RefreshCw size={13} className={syncing ? "spin" : ""} />
+                {syncing ? "Syncing…" : "Sync now"}
+              </button>
+              {syncReport && !syncing && (
+                <div className="sync-feedback ok">
+                  <CheckCircle2 size={14} />
+                  <span>
+                    ↑ <strong>{syncReport.uploaded}</strong>
+                    {"  ·  "}↓ <strong>{syncReport.downloaded}</strong>
+                    {"  ·  "}= <strong>{syncReport.skipped}</strong>
+                    {syncReport.errors.length > 0 && (
+                      <>{"  ·  "}<span className="sync-feedback-err">⚠ {syncReport.errors.length}</span></>
+                    )}
+                  </span>
+                </div>
+              )}
+              {syncError && !syncing && (
+                <div className="sync-feedback err" title={syncError}>
+                  <AlertTriangle size={14} />
+                  <span>{syncError.length > 90 ? syncError.slice(0, 87) + "…" : syncError}</span>
+                </div>
+              )}
+            </div>
+            {syncReport && syncReport.errors.length > 0 && (
+              <details className="sync-errors">
+                <summary>Errors ({syncReport.errors.length})</summary>
+                <ul>
+                  {syncReport.errors.map((e, i) => (
+                    <li key={i}>{e}</li>
+                  ))}
+                </ul>
+              </details>
+            )}
           </section>
         </div>
 

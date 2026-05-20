@@ -17,6 +17,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::Manager;
 
+mod s3;
+
 // ─── OpenRouter request/response types ─────────────────────────────────────
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -555,6 +557,8 @@ pub fn run() {
             delete_vault_file,
             rename_vault_file,
             create_vault_folder,
+            // S3 sync
+            s3::sync_vault,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
