@@ -1051,14 +1051,141 @@ html, body {
 }
 
 /* Code-only files (config.json, .ts, .py, …) get a syntax-highlighted
-   read-only view. Outer card already has padding, so we let the
-   highlighter render with zero margin and just clip overflow. */
+   read-only view in preview mode AND an in-place editable view in edit
+   mode. Both share the same fonts + token colours via the unified
+   Prism palette below. */
 .note-code {
   width: 100%;
   background: transparent;
   border-radius: var(--radius-sm);
   overflow-x: auto;
 }
+
+/* === Editable code surface (react-simple-code-editor + raw Prism) ===
+   The library renders a `<textarea>` on top of a syntax-highlighted
+   `<pre>`. We hand them identical typography so the textarea caret
+   lines up with the highlighted tokens behind it. A small gutter on
+   the left mirrors the line-number rail from the read-only view. */
+.code-editor-wrap {
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+  font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--fg);
+  background: transparent;
+}
+.code-editor-gutter {
+  flex-shrink: 0;
+  padding-right: 1em;
+  text-align: right;
+  opacity: 0.4;
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.code-editor-lineno {
+  min-width: 2.25em;
+  line-height: 1.55;
+}
+.code-editor-pane {
+  flex: 1 1 auto;
+  min-width: 0;
+  position: relative;
+}
+.code-editor-pane > div {
+  /* react-simple-code-editor's outer wrapper — let it stretch */
+  width: 100% !important;
+  min-height: 100%;
+}
+.code-editor-textarea,
+.code-editor-pre {
+  font-family: inherit !important;
+  font-size: inherit !important;
+  line-height: inherit !important;
+  background: transparent !important;
+}
+.code-editor-textarea {
+  outline: none !important;
+  caret-color: var(--accent);
+  /* keep the textarea text matching the pre exactly so the caret
+     sits over the actual character cell */
+  color: transparent !important;
+  /* Webkit's text-selection colour still works while the text itself
+     is transparent — we keep the selection visible. */
+}
+.code-editor-textarea::selection {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+/* === Shared Prism palette (used by both edit and read-only) ===
+   Approximates the OneDark / OneLight feel from react-syntax-highlighter
+   so flipping Edit ↔ View doesn't recolour the tokens visibly. The
+   read-only `<CodeView>` uses its own inline theme via rsh; we override
+   here for any DOM tokens we render ourselves (the edit surface). */
+.code-editor-pane .token.comment,
+.code-editor-pane .token.prolog,
+.code-editor-pane .token.doctype,
+.code-editor-pane .token.cdata { color: #a0a1a7; font-style: italic; }
+.code-editor-pane .token.punctuation { color: var(--fg); opacity: 0.7; }
+.code-editor-pane .token.property,
+.code-editor-pane .token.tag,
+.code-editor-pane .token.constant,
+.code-editor-pane .token.symbol,
+.code-editor-pane .token.deleted { color: #e45649; }
+.code-editor-pane .token.boolean,
+.code-editor-pane .token.number { color: #986801; }
+.code-editor-pane .token.selector,
+.code-editor-pane .token.attr-name,
+.code-editor-pane .token.string,
+.code-editor-pane .token.char,
+.code-editor-pane .token.builtin,
+.code-editor-pane .token.inserted { color: #50a14f; }
+.code-editor-pane .token.operator,
+.code-editor-pane .token.entity,
+.code-editor-pane .token.url,
+.code-editor-pane .language-css .token.string,
+.code-editor-pane .style .token.string { color: #383a42; }
+.code-editor-pane .token.atrule,
+.code-editor-pane .token.attr-value,
+.code-editor-pane .token.keyword { color: #a626a4; }
+.code-editor-pane .token.function,
+.code-editor-pane .token.class-name { color: #4078f2; }
+.code-editor-pane .token.regex,
+.code-editor-pane .token.important,
+.code-editor-pane .token.variable { color: #c18401; }
+
+/* Dark theme remap — same token roles, OneDark-ish hues. */
+.dark .code-editor-pane .token.comment,
+.dark .code-editor-pane .token.prolog,
+.dark .code-editor-pane .token.doctype,
+.dark .code-editor-pane .token.cdata { color: #5c6370; font-style: italic; }
+.dark .code-editor-pane .token.punctuation { color: #abb2bf; opacity: 1; }
+.dark .code-editor-pane .token.property,
+.dark .code-editor-pane .token.tag,
+.dark .code-editor-pane .token.constant,
+.dark .code-editor-pane .token.symbol,
+.dark .code-editor-pane .token.deleted { color: #e06c75; }
+.dark .code-editor-pane .token.boolean,
+.dark .code-editor-pane .token.number { color: #d19a66; }
+.dark .code-editor-pane .token.selector,
+.dark .code-editor-pane .token.attr-name,
+.dark .code-editor-pane .token.string,
+.dark .code-editor-pane .token.char,
+.dark .code-editor-pane .token.builtin,
+.dark .code-editor-pane .token.inserted { color: #98c379; }
+.dark .code-editor-pane .token.operator,
+.dark .code-editor-pane .token.entity,
+.dark .code-editor-pane .token.url { color: #abb2bf; }
+.dark .code-editor-pane .token.atrule,
+.dark .code-editor-pane .token.attr-value,
+.dark .code-editor-pane .token.keyword { color: #c678dd; }
+.dark .code-editor-pane .token.function,
+.dark .code-editor-pane .token.class-name { color: #61afef; }
+.dark .code-editor-pane .token.regex,
+.dark .code-editor-pane .token.important,
+.dark .code-editor-pane .token.variable { color: #e5c07b; }
 .note-code pre {
   margin: 0 !important;
   background: transparent !important;

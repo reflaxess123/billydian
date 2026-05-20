@@ -7,6 +7,7 @@ import { Eye, Pencil, Wand2, MapPin } from "lucide-react";
 import "katex/dist/katex.min.css";
 import { NoteViewMode, TokenStats } from "../types";
 import { CodeView, detectLanguage } from "./CodeView";
+import { CodeEditor } from "./CodeEditor";
 
 interface NoteEditorProps {
   title: string;
@@ -199,13 +200,20 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
         {/* Content card */}
         <div className="note-card note-content-card" style={cardStyle}>
           {mode === "edit" ? (
-            <textarea
-              ref={textareaRef}
-              className="note-textarea mono"
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              spellCheck={false}
-              placeholder={
+            isCode ? (
+              <CodeEditor
+                code={value}
+                language={lang!}
+                onChange={(next) => setValue(next)}
+              />
+            ) : (
+              <textarea
+                ref={textareaRef}
+                className="note-textarea mono"
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                spellCheck={false}
+                placeholder={
 `# Title
 
 Write Markdown here. Math works via $E = mc^2$ inline and
@@ -213,8 +221,9 @@ $$
 \\int_0^\\infty e^{-x^2}\\,dx = \\tfrac{\\sqrt{\\pi}}{2}
 $$
 display blocks.`
-              }
-            />
+                }
+              />
+            )
           ) : isCode ? (
             <div className="note-code">
               <CodeView code={value} language={lang!} isDark={isDark} />
