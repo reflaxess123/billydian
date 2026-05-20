@@ -794,6 +794,7 @@ function App() {
               width={settings.noteWidth}
               onWidthChange={(w) => updateSettings({ ...settings, noteWidth: w })}
               fileTokens={fileTokens}
+              isDark={settings.theme === "dark"}
             />
           )}
         </div>

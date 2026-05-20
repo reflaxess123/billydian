@@ -6,6 +6,7 @@ import rehypeKatex from "rehype-katex";
 import { Eye, Pencil, Wand2, MapPin } from "lucide-react";
 import "katex/dist/katex.min.css";
 import { NoteViewMode, TokenStats } from "../types";
+import { CodeView, detectLanguage } from "./CodeView";
 
 interface NoteEditorProps {
   title: string;
@@ -25,6 +26,8 @@ interface NoteEditorProps {
   onWidthChange: (next: number) => void;
   /** Per-file token spend (null if this note never used the AI). */
   fileTokens?: TokenStats | null;
+  /** Drives the Prism colour scheme in code highlighting. */
+  isDark: boolean;
 }
 
 // Discrete width steps. The active one lights up; clicking another
@@ -47,6 +50,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   width,
   onWidthChange,
   fileTokens,
+  isDark,
 }) => {
   const [value, setValue] = useState(initialContent);
   const [editingTitle, setEditingTitle] = useState(false);
@@ -109,6 +113,13 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
     const lines = value.length === 0 ? 0 : value.split("\n").length;
     return { chars, words, lines };
   }, [value]);
+
+  // Language detection: when the file's extension matches a known
+  // Prism grammar (and isn't markdown), we switch the preview from
+  // ReactMarkdown to a syntax-highlighted code view.
+  const baseName = relPath.split("/").slice(-1)[0] ?? relPath;
+  const lang = useMemo(() => detectLanguage(baseName), [baseName]);
+  const isCode = lang !== null && lang !== "md" && lang !== "markdown";
 
   const cardStyle: React.CSSProperties = { maxWidth: width };
 
@@ -204,11 +215,33 @@ $$
 display blocks.`
               }
             />
+          ) : isCode ? (
+            <div className="note-code">
+              <CodeView code={value} language={lang!} isDark={isDark} />
+            </div>
           ) : (
             <div className="note-preview">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm, remarkMath]}
                 rehypePlugins={[rehypeKatex]}
+                components={{
+                  code(props: any) {
+                    const { inline, className, children } = props;
+                    const match = /language-(\w+)/.exec(className || "");
+                    const codeStr = String(children ?? "").replace(/\n$/, "");
+                    if (inline || !match) {
+                      return <code className={className}>{children}</code>;
+                    }
+                    return (
+                      <CodeView
+                        code={codeStr}
+                        language={match[1]}
+                        isDark={isDark}
+                        inline={false}
+                      />
+                    );
+                  },
+                }}
               >
                 {value || ""}
               </ReactMarkdown>
@@ -223,6 +256,9 @@ display blocks.`
             <span className="note-footer-path">{relPath}</span>
           </div>
           <div className="note-footer-stats">
+            {isCode && lang && (
+              <span className="footer-lang"><strong>{lang}</strong></span>
+            )}
             <span><strong>{stats.words.toLocaleString()}</strong> words</span>
             <span><strong>{stats.chars.toLocaleString()}</strong> chars</span>
             <span><strong>{stats.lines.toLocaleString()}</strong> lines</span>

@@ -1037,6 +1037,50 @@ html, body {
   color: var(--fg);
 }
 
+/* Code-only files (config.json, .ts, .py, …) get a syntax-highlighted
+   read-only view. Outer card already has padding, so we let the
+   highlighter render with zero margin and just clip overflow. */
+.note-code {
+  width: 100%;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+}
+.note-code pre {
+  margin: 0 !important;
+  background: transparent !important;
+  font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", SFMono-Regular, Menlo, monospace !important;
+}
+/* Override prism theme background so the card stays clean — colours
+   are kept on the tokens themselves. */
+.note-code pre code,
+.note-code pre code * {
+  background: transparent !important;
+  text-shadow: none !important;
+}
+/* Same treatment for code blocks rendered inside markdown previews. */
+.note-preview pre[class*="language-"] {
+  background: var(--surface) !important;
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  margin: 0 0 14px;
+  font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", SFMono-Regular, Menlo, monospace !important;
+}
+.dark .note-preview pre[class*="language-"] {
+  background: var(--surface) !important;
+}
+
+.footer-lang {
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  font-size: 10px !important;
+}
+.footer-lang strong {
+  color: var(--accent) !important;
+  margin-right: 0 !important;
+}
+.dark .footer-lang strong { color: var(--accent) !important; }
+
 /* ── Footer card: location + content stats ── */
 .note-footer-card {
   display: flex;
