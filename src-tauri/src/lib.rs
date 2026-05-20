@@ -165,6 +165,17 @@ fn classify_file(name: &str) -> &'static str {
         "md"
     } else if lower.ends_with(".mindmap") {
         "mindmap"
+    } else if lower.ends_with(".png")
+        || lower.ends_with(".jpg")
+        || lower.ends_with(".jpeg")
+        || lower.ends_with(".gif")
+        || lower.ends_with(".webp")
+        || lower.ends_with(".svg")
+        || lower.ends_with(".bmp")
+        || lower.ends_with(".ico")
+        || lower.ends_with(".avif")
+    {
+        "image"
     } else {
         "other"
     }
@@ -295,6 +306,20 @@ fn read_vault_file(vault: String, rel: String) -> Result<String, String> {
         return Err(format!("Not a file: {}", rel));
     }
     fs::read_to_string(&path).map_err(|e| e.to_string())
+}
+
+/// Binary read → base64 string. The frontend wraps the result into a
+/// `data:image/...;base64,...` URL so the WebView can render images
+/// without us having to wire up tauri's asset protocol scope.
+#[tauri::command]
+fn read_vault_file_bytes(vault: String, rel: String) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD as B64, Engine};
+    let path = resolve_under_vault(&PathBuf::from(&vault), &rel)?;
+    if !path.is_file() {
+        return Err(format!("Not a file: {}", rel));
+    }
+    let bytes = fs::read(&path).map_err(|e| e.to_string())?;
+    Ok(B64.encode(bytes))
 }
 
 #[tauri::command]
@@ -569,6 +594,7 @@ pub fn run() {
             // Vault file ops
             list_vault_tree,
             read_vault_file,
+            read_vault_file_bytes,
             write_vault_file,
             delete_vault_file,
             rename_vault_file,

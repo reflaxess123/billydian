@@ -5,8 +5,6 @@ import {
   Settings as SettingsIcon,
   Sparkles,
   FolderOpen,
-  FileText,
-  Network,
   Plus,
   ZoomIn,
   ZoomOut,
@@ -64,7 +62,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   syncError,
 }) => {
   const [topic, setTopic] = useState("");
-  const [genKind, setGenKind] = useState<NewKind>("mindmap");
+  // The AI generator now only produces mind maps; plain notes are
+  // created via the `+` button next to the vault chip.
+  const GEN_KIND: NewKind = "mindmap";
 
   const toggleTheme = () => {
     onSettingsChange({
@@ -83,7 +83,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     e.preventDefault();
     const t = topic.trim();
     if (!t) return;
-    onGenerate(genKind, t);
+    onGenerate(GEN_KIND, t);
     setTopic("");
   };
 
@@ -170,67 +170,52 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        {/* Vault picker chip */}
-        <button
-          className="vault-pick-btn"
-          onClick={onPickVault}
-          title={vaultPath ?? "Pick a vault folder"}
-        >
-          <FolderOpen size={14} />
-          <span className="vault-pick-label">
-            {vaultPath ? vaultPath.split(/[\\/]/).slice(-1)[0] : "Pick vault…"}
-          </span>
-        </button>
+        {/* Vault row: picker chip + new-note `+` to its right */}
+        <div className="vault-row">
+          <button
+            className="vault-pick-btn"
+            onClick={onPickVault}
+            title={vaultPath ?? "Pick a vault folder"}
+          >
+            <FolderOpen size={14} />
+            <span className="vault-pick-label">
+              {vaultPath ? vaultPath.split(/[\\/]/).slice(-1)[0] : "Pick vault…"}
+            </span>
+          </button>
+          {vaultPath && (
+            <button
+              type="button"
+              className="vault-new-btn"
+              onClick={onCreateBlankNote}
+              title="New blank note"
+              aria-label="New blank note"
+            >
+              <Plus size={14} />
+            </button>
+          )}
+        </div>
 
-        {/* Generate + blank note */}
+        {/* Mind-map generator — single input + AI sparkle */}
         {vaultPath && (
-          <div className="gen-block">
-            <div className="gen-kind-toggle">
-              <button
-                type="button"
-                className={`gen-kind-btn${genKind === "mindmap" ? " active" : ""}`}
-                onClick={() => setGenKind("mindmap")}
-                title="Generate a mind map"
-              >
-                <Network size={12} /> Map
-              </button>
-              <button
-                type="button"
-                className={`gen-kind-btn${genKind === "note" ? " active" : ""}`}
-                onClick={() => setGenKind("note")}
-                title="Generate a markdown note"
-              >
-                <FileText size={12} /> Note
-              </button>
-            </div>
-            <form className="gen-input-row" onSubmit={submitGenerate}>
-              <input
-                type="text"
-                value={topic}
-                onChange={(e) => setTopic(e.target.value)}
-                placeholder={genKind === "mindmap" ? "Mind map topic…" : "Note topic…"}
-                className="api-input"
-                disabled={isGenerating}
-              />
-              <button
-                type="submit"
-                className="gen-submit-btn"
-                disabled={isGenerating || !topic.trim()}
-                title="Generate via AI"
-              >
-                <Sparkles size={13} />
-              </button>
-              <button
-                type="button"
-                className="gen-submit-btn alt"
-                onClick={onCreateBlankNote}
-                title="Create a blank note (no AI)"
-                aria-label="New blank note"
-              >
-                <Plus size={14} />
-              </button>
-            </form>
-          </div>
+          <form className="gen-input-row" onSubmit={submitGenerate}>
+            <input
+              type="text"
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
+              placeholder="Mind map topic…"
+              className="api-input"
+              disabled={isGenerating}
+            />
+            <button
+              type="submit"
+              className="gen-submit-btn"
+              disabled={isGenerating || !topic.trim()}
+              title="Generate mind map via AI"
+              aria-label="Generate mind map"
+            >
+              <Sparkles size={13} />
+            </button>
+          </form>
         )}
 
         {/* Tree */}

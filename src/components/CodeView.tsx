@@ -1,4 +1,5 @@
-import React from "react";
+import React, { useState } from "react";
+import { Copy, Check } from "lucide-react";
 import { PrismLight as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark, oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 
@@ -131,33 +132,54 @@ interface CodeViewProps {
 
 export const CodeView: React.FC<CodeViewProps> = ({ code, language, isDark, inline }) => {
   const theme = isDark ? oneDark : oneLight;
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1400);
+    } catch {
+      /* clipboard blocked — no graceful fallback in WebView2 */
+    }
+  };
   return (
-    <SyntaxHighlighter
-      language={language}
-      style={theme as any}
-      showLineNumbers={!inline}
-      wrapLongLines={false}
-      customStyle={{
-        margin: 0,
-        background: "transparent",
-        fontSize: 13,
-        lineHeight: 1.55,
-        padding: 0,
-      }}
-      lineNumberStyle={{
-        opacity: 0.4,
-        minWidth: "2.25em",
-        paddingRight: "1em",
-        userSelect: "none",
-      }}
-      codeTagProps={{
-        style: {
-          fontFamily:
-            '"JetBrains Mono", ui-monospace, "Cascadia Code", SFMono-Regular, Menlo, monospace',
-        },
-      }}
-    >
-      {code}
-    </SyntaxHighlighter>
+    <div className="code-block">
+      <button
+        type="button"
+        className={`code-copy-btn${copied ? " copied" : ""}`}
+        onClick={handleCopy}
+        title={copied ? "Copied!" : "Copy"}
+        aria-label="Copy code"
+      >
+        {copied ? <Check size={12} /> : <Copy size={12} />}
+      </button>
+      <SyntaxHighlighter
+        language={language}
+        style={theme as any}
+        showLineNumbers={!inline}
+        wrapLongLines={false}
+        customStyle={{
+          margin: 0,
+          background: "transparent",
+          fontSize: 13,
+          lineHeight: 1.55,
+          padding: 0,
+        }}
+        lineNumberStyle={{
+          opacity: 0.4,
+          minWidth: "2.25em",
+          paddingRight: "1em",
+          userSelect: "none",
+        }}
+        codeTagProps={{
+          style: {
+            fontFamily:
+              '"JetBrains Mono", ui-monospace, "Cascadia Code", SFMono-Regular, Menlo, monospace',
+          },
+        }}
+      >
+        {code}
+      </SyntaxHighlighter>
+    </div>
   );
 };

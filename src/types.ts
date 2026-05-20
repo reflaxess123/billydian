@@ -75,7 +75,7 @@ export const EMPTY_LEDGER: TokenLedger = { byFile: {} };
 export interface VaultEntry {
   path: string;        // vault-relative, "/"-separated
   name: string;
-  kind: "dir" | "md" | "mindmap" | "other";
+  kind: "dir" | "md" | "mindmap" | "image" | "other";
   children?: VaultEntry[] | null;
   modified?: number | null;
 }
@@ -84,4 +84,5 @@ export interface VaultEntry {
 export type OpenDoc =
   | null
   | { kind: "md"; relPath: string; content: string }
-  | { kind: "mindmap"; relPath: string; tree: MindMapNodeData };
+  | { kind: "mindmap"; relPath: string; tree: MindMapNodeData }
+  | { kind: "image"; relPath: string; dataUrl: string };

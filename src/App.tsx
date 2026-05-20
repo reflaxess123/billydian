@@ -15,6 +15,7 @@ import {
 import { Sidebar } from "./components/Sidebar";
 import { MindMapCanvas } from "./components/MindMapCanvas";
 import { NoteEditor } from "./components/NoteEditor";
+import { ImageViewer } from "./components/ImageViewer";
 import { TitleBar } from "./components/TitleBar";
 import { SettingsModal } from "./components/SettingsModal";
 import { Sparkles, AlertTriangle, X, FolderOpen } from "lucide-react";
@@ -232,6 +233,29 @@ function App() {
   const handleOpenFile = useCallback(async (entry: VaultEntry) => {
     if (!vaultPath || entry.kind === "dir") return;
     try {
+      if (entry.kind === "image") {
+        // Binary read → wrap as data URL for the WebView to render.
+        const b64 = await invoke<string>("read_vault_file_bytes", {
+          vault: vaultPath,
+          rel: entry.path,
+        });
+        const ext = (entry.path.toLowerCase().match(/\.([^.]+)$/) ?? [, ""])[1];
+        const mime =
+          ext === "svg" ? "image/svg+xml"
+            : ext === "jpg" || ext === "jpeg" ? "image/jpeg"
+            : ext === "gif" ? "image/gif"
+            : ext === "webp" ? "image/webp"
+            : ext === "avif" ? "image/avif"
+            : ext === "bmp" ? "image/bmp"
+            : ext === "ico" ? "image/x-icon"
+            : "image/png";
+        setOpenDoc({
+          kind: "image",
+          relPath: entry.path,
+          dataUrl: `data:${mime};base64,${b64}`,
+        });
+        return;
+      }
       const raw = await tauriReadFile(vaultPath, entry.path);
       if (entry.kind === "md") {
         setOpenDoc({ kind: "md", relPath: entry.path, content: raw });
@@ -768,6 +792,11 @@ function App() {
                 </p>
               </div>
             </div>
+          ) : openDoc.kind === "image" ? (
+            <ImageViewer
+              src={openDoc.dataUrl}
+              alt={openDoc.relPath.split("/").slice(-1)[0]}
+            />
           ) : openDoc.kind === "mindmap" ? (
             <MindMapCanvas
               data={openDoc.tree}

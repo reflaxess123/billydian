@@ -299,6 +299,29 @@ html, body {
   text-overflow: ellipsis;
 }
 
+/* Vault row: picker chip + `+` new-note button glued to its right. */
+.vault-row {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+}
+.vault-row .vault-pick-btn { flex: 1 1 auto; min-width: 0; }
+.vault-new-btn {
+  appearance: none;
+  flex-shrink: 0;
+  width: 32px;
+  background: var(--surface);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s var(--ease-out), color 0.12s var(--ease-out);
+}
+.vault-new-btn:hover { background: var(--hover); color: var(--fg); }
+
 /* Vault picker chip */
 .vault-pick-btn {
   appearance: none;
@@ -321,45 +344,7 @@ html, body {
 }
 .vault-pick-btn svg { color: var(--muted); flex-shrink: 0; }
 
-/* Generator (note / mindmap) */
-.gen-block {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.gen-form {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.gen-kind-toggle {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  background: var(--surface);
-  padding: 3px;
-  border-radius: var(--radius-sm);
-  gap: 3px;
-}
-.gen-kind-btn {
-  appearance: none;
-  border: none;
-  background: transparent;
-  color: var(--muted);
-  font: 600 11px / 1 inherit;
-  padding: 6px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
-  transition: background 0.15s var(--ease-out), color 0.15s var(--ease-out);
-}
-.gen-kind-btn:hover { color: var(--fg); }
-.gen-kind-btn.active {
-  background: var(--bg-elevated);
-  color: var(--fg);
-  box-shadow: 0 1px 2px rgba(0,0,0,0.08);
-}
-.dark .gen-kind-btn.active { box-shadow: 0 1px 2px rgba(0,0,0,0.25); }
-
+/* Mind-map generator — single input + AI sparkle, no kind toggle */
 .gen-input-row { display: flex; gap: 4px; align-items: stretch; }
 .gen-input-row .api-input { flex: 1 1 auto; }
 .gen-submit-btn {
@@ -376,14 +361,6 @@ html, body {
 }
 .gen-submit-btn:hover:not(:disabled) { filter: brightness(1.05); }
 .gen-submit-btn:disabled { background: var(--surface); color: var(--muted); cursor: not-allowed; }
-.gen-submit-btn.alt {
-  background: var(--surface);
-  color: var(--fg);
-}
-.gen-submit-btn.alt:hover:not(:disabled) {
-  background: var(--hover);
-  filter: none;
-}
 
 /* ===== Vault tree ===== */
 .vault-tree-wrap {
@@ -1061,6 +1038,46 @@ html, body {
   overflow-x: auto;
 }
 
+/* Wrapper around every read-only code render — provides a hover-only
+   copy button anchored to the top-right corner of the block. */
+.code-block {
+  position: relative;
+}
+.code-block > pre { margin: 0 !important; }
+.code-copy-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 24px; height: 24px;
+  background: color-mix(in srgb, var(--bg-elevated) 90%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  opacity: 0;
+  transform: scale(0.92);
+  transition: opacity 0.15s var(--ease-out), transform 0.15s var(--ease-out),
+              background 0.12s var(--ease-out), color 0.12s var(--ease-out);
+  z-index: 4;
+}
+.code-block:hover .code-copy-btn,
+.code-block .code-copy-btn:focus-visible {
+  opacity: 1;
+  transform: scale(1);
+}
+.code-copy-btn:hover { background: var(--accent); color: var(--accent-fg); }
+.code-copy-btn.copied {
+  opacity: 1;
+  transform: scale(1);
+  background: var(--ok);
+  color: var(--accent-fg);
+  border-color: var(--ok);
+}
+
 /* === Editable code surface (react-simple-code-editor + raw Prism) ===
    The library renders a `<textarea>` on top of a syntax-highlighted
    `<pre>`. We hand them identical typography so the textarea caret
@@ -1208,6 +1225,73 @@ html, body {
 }
 .dark .note-preview pre[class*="language-"] {
   background: var(--surface) !important;
+}
+
+/* ─── Image viewer ──────────────────────────────────────────────────
+   Behaves like the mind-map canvas: middle-mouse or left-mouse drag
+   to pan, wheel to zoom centred on the cursor, double-click resets
+   to the "fit-into-viewport" scale. Image is centred via translate
+   from the centre, then drag-translate is layered on top. */
+.image-viewer {
+  flex: 1 1 auto;
+  position: relative;
+  width: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 0.5px 0.5px, var(--border) 0.5px, transparent 0.5px) 0 0 / 22px 22px;
+  cursor: grab;
+  user-select: none;
+}
+.image-viewer.dragging { cursor: grabbing; }
+.image-viewer img {
+  position: absolute;
+  top: 50%; left: 50%;
+  /* `transform` is set inline; we initialise transform-origin so
+     scaling preserves the centred anchor. */
+  transform-origin: center;
+  max-width: none;
+  max-height: none;
+  image-rendering: high-quality;
+  pointer-events: none;
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,0.2));
+}
+.image-viewer-toolbar {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-card);
+  z-index: 5;
+}
+.image-viewer-toolbar button {
+  appearance: none;
+  width: 28px; height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 50%;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s var(--ease-out), color 0.12s var(--ease-out);
+}
+.image-viewer-toolbar button:hover { background: var(--hover); color: var(--fg); }
+.image-viewer-scale {
+  font: 700 11px / 1 inherit;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+  padding: 0 8px;
+  min-width: 44px;
+  text-align: center;
 }
 
 .footer-lang {
