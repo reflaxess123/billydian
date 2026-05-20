@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Eye, EyeOff, X, Cpu, Key, Cloud, RefreshCw, CheckCircle2, AlertTriangle } from "lucide-react";
 import { AppSettings } from "../types";
 import { SyncReport } from "../App";
@@ -8,6 +8,7 @@ interface SettingsModalProps {
   onChange: (next: AppSettings) => void;
   onClose: () => void;
   onSync: () => void;
+  vaultPath: string | null;
   s3Ready: boolean;
   syncing: boolean;
   syncReport: SyncReport | null;
@@ -19,6 +20,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onChange,
   onClose,
   onSync,
+  vaultPath,
   s3Ready,
   syncing,
   syncReport,
@@ -28,12 +30,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [showS3Secret, setShowS3Secret] = useState(false);
   const [closing, setClosing] = useState(false);
 
+  // Park the pending close timer in a ref so an unmount-mid-animation
+  // (StrictMode double effect, rapid open/close, parent route change)
+  // can cancel it cleanly — otherwise the timer keeps the `onClose`
+  // closure pinned in the event loop for ~220ms after we're gone.
+  const closeTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current !== null) {
+        window.clearTimeout(closeTimerRef.current);
+      }
+    };
+  }, []);
+
   // Play the modal-out animation before actually unmounting. Duration
   // here must match the CSS `modalOut`/`fadeOut` keyframes (220 ms).
   const requestClose = () => {
     if (closing) return;
     setClosing(true);
-    setTimeout(onClose, 220);
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null;
+      onClose();
+    }, 220);
   };
 
   const setS3 = (patch: Partial<AppSettings["s3"]>) => {

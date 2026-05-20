@@ -47,8 +47,12 @@ interface SidebarProps {
 const SCALE_STEP = 0.1;
 const SCALE_MIN = 0.7;
 const SCALE_MAX = 1.6;
+// Module-scope so we don't recompile per call. Splits paths on either
+// `/` (POSIX) or `\` (Windows) so we can pull the basename of a vault
+// path regardless of which the OS handed us.
+const PATH_SEP_RE = /[\\/]/;
 
-export const Sidebar: React.FC<SidebarProps> = ({
+const SidebarImpl: React.FC<SidebarProps> = ({
   settings,
   onSettingsChange,
   vaultPath,
@@ -100,7 +104,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     };
   }, [vaultMenuOpen]);
 
-  const basename = (p: string) => p.split(/[\\/]/).slice(-1)[0] || p;
+  const basename = (p: string) => p.split(PATH_SEP_RE).slice(-1)[0] || p;
   const handleVaultClick = () => {
     // First-time use (no known vaults): jump straight to the OS dialog.
     if (knownVaults.length === 0) onPickVault();
@@ -343,3 +347,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
     </aside>
   );
 };
+
+// Memo'd — App.tsx re-renders on every settings tick, sync feedback
+// timer, ledger update. Sidebar takes 18 props but most are stable
+// callbacks (now wrapped in useCallback upstream); when only an
+// irrelevant App state changes, shallow equality short-circuits all
+// the children including FolderTree.
+export const Sidebar = React.memo(SidebarImpl);

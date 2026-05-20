@@ -1,8 +1,11 @@
 {
   "compilerOptions": {
-    "target": "ES2020",
+    // Bumped from ES2020 → ES2022: WebView2 supports class fields,
+    // top-level await, and Object.hasOwn natively. Lets esbuild emit
+    // the native syntax instead of downleveling.
+    "target": "ES2022",
     "useDefineForClassFields": true,
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "skipLibCheck": true,
 
@@ -18,7 +21,12 @@
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+
+    /* Faster reruns: cache the type-check result on disk. The build
+       script does `tsc && vite build`, so incremental shaves seconds
+       off the inner CI loop. */
+    "incremental": true
   },
   "include": ["src"],
   "references": [{ "path": "./tsconfig.node.json" }]

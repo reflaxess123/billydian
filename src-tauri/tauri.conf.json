@@ -10,6 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "withGlobalTauri": false,
     "windows": [
       {
         "label": "main",
@@ -25,7 +26,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: data: blob: https: http://ipc.localhost; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://openrouter.ai https://*.amazonaws.com https://*.r2.cloudflarestorage.com https://*.yandexcloud.net https://storage.yandexcloud.net"
     }
   },
   "bundle": {

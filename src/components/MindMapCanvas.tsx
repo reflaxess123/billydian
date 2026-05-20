@@ -16,7 +16,7 @@ interface MindMapCanvasProps {
   fileTokens?: TokenStats | null;
 }
 
-export const MindMapCanvas: React.FC<MindMapCanvasProps> = ({
+const MindMapCanvasImpl: React.FC<MindMapCanvasProps> = ({
   data,
   onToggleCollapse,
   onEdit,
@@ -35,6 +35,25 @@ export const MindMapCanvas: React.FC<MindMapCanvasProps> = ({
   const [translateY, setTranslateY] = useState(300);
   const [isDragging, setIsDragging] = useState(false);
 
+  // Mirror the latest scale/translate into refs so the wheel handler
+  // can read fresh values without us having to re-bind the listener on
+  // every zoom step. The old setup kept `[scale, translateX, translateY]`
+  // in the effect deps → addEventListener + removeEventListener fired
+  // for every wheel tick (10-60 times per gesture), churning React +
+  // DOM bookkeeping for no reason.
+  const scaleRef = useRef(scale);
+  const txRef = useRef(translateX);
+  const tyRef = useRef(translateY);
+  useEffect(() => {
+    scaleRef.current = scale;
+  }, [scale]);
+  useEffect(() => {
+    txRef.current = translateX;
+  }, [translateX]);
+  useEffect(() => {
+    tyRef.current = translateY;
+  }, [translateY]);
+
   // Set initial coordinates centered in the workspace
   useEffect(() => {
     if (containerRef.current) {
@@ -44,25 +63,29 @@ export const MindMapCanvas: React.FC<MindMapCanvasProps> = ({
     }
   }, []);
 
-  // Zoom relative to mouse pointer (attached directly to handle passive gotchas in Chrome/Safari)
+  // Wheel zoom — registered ONCE at mount, reads live state via refs.
+  // `{ passive: false }` is required to call preventDefault inside.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
-      
+      const curScale = scaleRef.current;
+      const curTx = txRef.current;
+      const curTy = tyRef.current;
+
       const zoomIntensity = 0.08;
-      const scaleFactor = e.deltaY < 0 ? (1 + zoomIntensity) : (1 - zoomIntensity);
-      const newScale = Math.min(Math.max(scale * scaleFactor, 0.15), 3.0);
+      const scaleFactor = e.deltaY < 0 ? 1 + zoomIntensity : 1 - zoomIntensity;
+      const newScale = Math.min(Math.max(curScale * scaleFactor, 0.15), 3.0);
 
       const rect = container.getBoundingClientRect();
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
 
-      // Translate canvas so mouse point stays fixed
-      const contentX = (mouseX - translateX) / scale;
-      const contentY = (mouseY - translateY) / scale;
+      // Translate canvas so the mouse point stays fixed.
+      const contentX = (mouseX - curTx) / curScale;
+      const contentY = (mouseY - curTy) / curScale;
 
       setScale(newScale);
       setTranslateX(mouseX - contentX * newScale);
@@ -73,7 +96,7 @@ export const MindMapCanvas: React.FC<MindMapCanvasProps> = ({
     return () => {
       container.removeEventListener("wheel", handleWheel);
     };
-  }, [scale, translateX, translateY]);
+  }, []);
 
   // Mouse drag-to-pan using the Middle Mouse Button (wheel click, e.button === 1)
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -147,22 +170,33 @@ export const MindMapCanvas: React.FC<MindMapCanvasProps> = ({
   const prevNodesRef = useRef<Map<string, ExitingNode>>(new Map());
   const [exitingNodes, setExitingNodes] = useState<ExitingNode[]>([]);
 
+  // File-switch reset: this canvas is mounted at the same JSX position
+  // whether we're viewing map A, B, or C. The `data` prop swaps but the
+  // component instance — and `prevNodesRef.current` along with it —
+  // survives. Without this reset, opening B after A would briefly paint
+  // any A-ids that don't exist in B as "exiting ghosts" on first frame.
+  // Keyed on the root id which is stable per file.
   useEffect(() => {
-    const currentIds = new Set(nodes.map((n) => n.data.id));
-    const stale: ExitingNode[] = [];
-    prevNodesRef.current.forEach((prev) => {
-      if (!currentIds.has(prev.id)) stale.push(prev);
-    });
+    prevNodesRef.current = new Map();
+    setExitingNodes([]);
+  }, [data.id]);
 
+  useEffect(() => {
+    // Single-pass diff: walk the new `nodes` building the next snapshot,
+    // and mark each id as "kept" in the previous map. Anything still
+    // unmarked when we're done is stale (its ancestor just collapsed
+    // or the node was deleted) → schedule it for the exit animation.
+    const prev = prevNodesRef.current;
+    const kept = new Set<string>();
     const nextMap = new Map<string, ExitingNode>();
-    nodes.forEach((n) => {
-      nextMap.set(n.data.id, {
-        id: n.data.id,
-        x: n.x,
-        y: n.y,
-        depth: n.depth,
-        data: n.data,
-      });
+    for (const n of nodes) {
+      const id = n.data.id;
+      kept.add(id);
+      nextMap.set(id, { id, x: n.x, y: n.y, depth: n.depth, data: n.data });
+    }
+    const stale: ExitingNode[] = [];
+    prev.forEach((p, id) => {
+      if (!kept.has(id)) stale.push(p);
     });
     prevNodesRef.current = nextMap;
 
@@ -259,7 +293,8 @@ export const MindMapCanvas: React.FC<MindMapCanvasProps> = ({
             />
           ))}
           {/* Ghost copies of nodes whose ancestor just collapsed.
-              They fade + shrink toward the parent for ~320ms. */}
+              They fade out for ~320ms. Same transform-based positioning
+              as the live nodes so they stay anchored. */}
           {exitingNodes.map((node) => (
             <div
               key={`exit-${node.id}`}
@@ -272,7 +307,9 @@ export const MindMapCanvas: React.FC<MindMapCanvasProps> = ({
                   ? "glow-depth-2"
                   : "glow-depth-3"
               }`}
-              style={{ left: `${node.y}px`, top: `${node.x}px` }}
+              style={{
+                transform: `translate3d(${node.y}px, ${node.x}px, 0) translateY(-50%)`,
+              }}
             >
               <div className="node-body">
                 <div className="node-text-container">
@@ -297,7 +334,7 @@ export const MindMapCanvas: React.FC<MindMapCanvasProps> = ({
             <span className="ct-val">{fileTokens.completion.toLocaleString()}</span>
           </span>
           <span className="ct-pair total">
-            <span className="ct-key">Σ</span>
+            <span className="ct-key">all</span>
             <span className="ct-val">{fileTokens.total.toLocaleString()}</span>
           </span>
         </div>
@@ -305,3 +342,8 @@ export const MindMapCanvas: React.FC<MindMapCanvasProps> = ({
     </div>
   );
 };
+
+// Memoised: the canvas + its d3 layout only need to recompute when
+// `data` changes. All other props are stable callbacks from App.tsx
+// (already wrapped in useCallback), so default shallow-equal is enough.
+export const MindMapCanvas = React.memo(MindMapCanvasImpl);

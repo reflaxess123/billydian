@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Copy, Check } from "lucide-react";
 import { PrismLight as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark, oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
@@ -130,14 +130,38 @@ interface CodeViewProps {
   inline?: boolean;
 }
 
-export const CodeView: React.FC<CodeViewProps> = ({ code, language, isDark, inline }) => {
+// Prism tokenisation is O(N) but with a hefty constant — on a 50KB code
+// block it can take 100-500ms and blocks the main thread the whole time.
+// Above this threshold we render the code as plain `<pre>` instead.
+// Generated/minified blobs hit this; hand-written code very rarely does.
+const PRISM_MAX_BYTES = 32 * 1024;
+
+const CodeViewImpl: React.FC<CodeViewProps> = ({ code, language, isDark, inline }) => {
   const theme = isDark ? oneDark : oneLight;
   const [copied, setCopied] = useState(false);
+  const tooLargeForPrism = code.length > PRISM_MAX_BYTES;
+  // Track the pending "reset copied" timer so a fast switch-file (which
+  // unmounts this code block) doesn't leave a closure pinning `setCopied`
+  // — and the surrounding `code` string — in the timer queue for ~1.4s.
+  const copyTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+    };
+  }, []);
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(code);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1400);
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+      copyTimerRef.current = window.setTimeout(() => {
+        setCopied(false);
+        copyTimerRef.current = null;
+      }, 1400);
     } catch {
       /* clipboard blocked — no graceful fallback in WebView2 */
     }
@@ -153,33 +177,49 @@ export const CodeView: React.FC<CodeViewProps> = ({ code, language, isDark, inli
       >
         {copied ? <Check size={12} /> : <Copy size={12} />}
       </button>
-      <SyntaxHighlighter
-        language={language}
-        style={theme as any}
-        showLineNumbers={!inline}
-        wrapLongLines={false}
-        customStyle={{
-          margin: 0,
-          background: "transparent",
-          fontSize: 13,
-          lineHeight: 1.55,
-          padding: 0,
-        }}
-        lineNumberStyle={{
-          opacity: 0.4,
-          minWidth: "2.25em",
-          paddingRight: "1em",
-          userSelect: "none",
-        }}
-        codeTagProps={{
-          style: {
-            fontFamily:
-              '"JetBrains Mono", ui-monospace, "Cascadia Code", SFMono-Regular, Menlo, monospace',
-          },
-        }}
-      >
-        {code}
-      </SyntaxHighlighter>
+      {tooLargeForPrism ? (
+        // Bail out of tokenisation for huge blobs. The user still sees
+        // the code (and can copy it), just without colour. This trades
+        // syntax highlighting for never-blocking the main thread.
+        <pre className="code-block-plain">
+          <code>{code}</code>
+        </pre>
+      ) : (
+        <SyntaxHighlighter
+          language={language}
+          style={theme as any}
+          showLineNumbers={!inline}
+          wrapLongLines={false}
+          customStyle={{
+            margin: 0,
+            background: "transparent",
+            fontSize: 13,
+            lineHeight: 1.55,
+            padding: 0,
+          }}
+          lineNumberStyle={{
+            opacity: 0.4,
+            minWidth: "2.25em",
+            paddingRight: "1em",
+            userSelect: "none",
+          }}
+          codeTagProps={{
+            style: {
+              fontFamily:
+                '"JetBrains Mono", ui-monospace, "Cascadia Code", SFMono-Regular, Menlo, monospace',
+            },
+          }}
+        >
+          {code}
+        </SyntaxHighlighter>
+      )}
     </div>
   );
 };
+
+// Memo'd — ReactMarkdown's custom `components.code` renderer hands a
+// fresh CodeView per re-parse of the parent note. With memo, identical
+// code+language combos skip the Prism tokenization pass entirely. For
+// a note with 10 code blocks, that's 10 token passes saved per
+// keystroke.
+export const CodeView = React.memo(CodeViewImpl);

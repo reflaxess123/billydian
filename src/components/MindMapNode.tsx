@@ -17,7 +17,7 @@ interface MindMapNodeProps {
   generatingNodeId: string | null;
 }
 
-export const MindMapNode: React.FC<MindMapNodeProps> = ({
+const MindMapNodeImpl: React.FC<MindMapNodeProps> = ({
   node,
   onToggleCollapse,
   onEdit,
@@ -73,9 +73,13 @@ export const MindMapNode: React.FC<MindMapNodeProps> = ({
       className={`mindmap-node ${getGlowColorClass(depth)}${
         isEditing ? " editing" : ""
       }${isGenerating ? " generating" : ""}`}
+      // Position via translate3d + half-height centering, NOT left/top.
+      // Animating left/top triggers layout per frame; transform stays on
+      // the compositor, so dragging a 100-node graph holds 60 fps instead
+      // of dropping to 30. The CSS-side transition on `.mindmap-node`
+      // (App.css) also needs to be transform-only.
       style={{
-        left: `${node.y}px`,
-        top: `${node.x}px`,
+        transform: `translate3d(${node.y}px, ${node.x}px, 0) translateY(-50%)`,
       }}
       onDoubleClick={(e) => {
         e.stopPropagation();
@@ -164,3 +168,22 @@ export const MindMapNode: React.FC<MindMapNodeProps> = ({
     </div>
   );
 };
+
+// Memo with a custom comparator: only re-render this row when something
+// it ACTUALLY uses changes. The big win is `generatingNodeId` — without
+// custom equality, every "node N started/stopped generating" change
+// re-renders all N nodes on the canvas (because the prop is the same
+// scalar passed to every row). With the comparator below, only the
+// previously-generating row and the new one re-render.
+export const MindMapNode = React.memo(MindMapNodeImpl, (prev, next) => {
+  if (prev.node !== next.node) return false;
+  if (prev.onToggleCollapse !== next.onToggleCollapse) return false;
+  if (prev.onEdit !== next.onEdit) return false;
+  if (prev.onDelete !== next.onDelete) return false;
+  if (prev.onAddChild !== next.onAddChild) return false;
+  if (prev.onAiExpand !== next.onAiExpand) return false;
+  // generatingNodeId matters only if THIS node's generating state flipped.
+  const wasGen = prev.generatingNodeId === prev.node.data.id;
+  const isGen = next.generatingNodeId === next.node.data.id;
+  return wasGen === isGen;
+});

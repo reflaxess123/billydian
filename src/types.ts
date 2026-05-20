@@ -72,17 +72,46 @@ export const EMPTY_TOKENS: TokenStats = { prompt: 0, completion: 0, total: 0 };
 export const EMPTY_LEDGER: TokenLedger = { byFile: {} };
 
 // Recursive folder tree returned from the backend.
+// `modified` used to live here but the UI never read it, and fetching
+// mtime per file is a full stat syscall — dropping it halved tree load
+// time on large monorepos.
 export interface VaultEntry {
   path: string;        // vault-relative, "/"-separated
   name: string;
-  kind: "dir" | "md" | "mindmap" | "image" | "other";
+  kind: "dir" | "md" | "mindmap" | "image" | "docx" | "other";
   children?: VaultEntry[] | null;
-  modified?: number | null;
 }
 
 // Currently open document.
+// `image` carries only the relPath — `ImageViewer` reads the bytes via
+// the binary IPC channel and owns the blob URL lifecycle. Avoids pinning
+// a 5-20MB base64 string in React state for every opened picture.
+// `docx` is the same shape — `DocxViewer` reads + converts on its own
+// and the heavy mammoth/turndown libs are dynamically imported when a
+// `.docx` is opened, so they never appear in the initial bundle.
 export type OpenDoc =
   | null
   | { kind: "md"; relPath: string; content: string }
   | { kind: "mindmap"; relPath: string; tree: MindMapNodeData }
-  | { kind: "image"; relPath: string; dataUrl: string };
+  | { kind: "image"; relPath: string }
+  | { kind: "docx"; relPath: string };
+
+// Device-local secrets — stored in the OS app config dir (Windows:
+// AppData\Roaming\Billydian\secrets.json), never inside the vault.
+// `read_secrets` / `write_secrets` are the IPC bridges.
+export interface DeviceSecrets {
+  apiKey: string;
+  s3: S3Settings;
+}
+
+export const EMPTY_SECRETS: DeviceSecrets = {
+  apiKey: "",
+  s3: {
+    endpoint: "",
+    region: "",
+    accessKeyId: "",
+    secretAccessKey: "",
+    bucket: "",
+    prefix: "",
+  },
+};

@@ -72,13 +72,34 @@ pub struct SyncReport {
 /// During sync, anything that matches this list is:
 ///   - skipped locally (we don't upload it), AND
 ///   - actively deleted on the remote side if it's already there.
-const EXCLUDED_SEGMENTS: &[&str] = &[
+pub(crate) const EXCLUDED_SEGMENTS: &[&str] = &[
+    // App + VCS
     ".billydian",
     ".mindmapper",
     ".git",
     ".svn",
     ".hg",
+    // JS/TS deps & lockfile stores
     "node_modules",
+    ".pnpm-store",
+    ".yarn",
+    // Build / output dirs (regeneratable, often huge in monorepos)
+    "dist",
+    "build",
+    "out",
+    "target",
+    "coverage",
+    // Framework / bundler caches
+    ".next",
+    ".nuxt",
+    ".svelte-kit",
+    ".angular",
+    ".turbo",
+    ".cache",
+    ".parcel-cache",
+    ".vite",
+    ".rollup.cache",
+    // OS junk
     "Thumbs.db",
     ".DS_Store",
 ];
@@ -222,12 +243,21 @@ fn sign(
 // ─── URL helpers ───────────────────────────────────────────────────────────
 
 /// Percent-encode every path segment except the slash separators —
-/// matches what S3's SigV4 canonical URI rules expect.
+/// matches what S3's SigV4 canonical URI rules expect. Builds the
+/// result string directly without the intermediate Vec<String> the old
+/// implementation collected into.
 fn encode_key(key: &str) -> String {
-    key.split('/')
-        .map(|seg| urlencoding::encode(seg).to_string())
-        .collect::<Vec<_>>()
-        .join("/")
+    let mut out = String::with_capacity(key.len() + 16);
+    for (i, seg) in key.split('/').enumerate() {
+        if i > 0 {
+            out.push('/');
+        }
+        // urlencoding::encode returns Cow<str> — borrowed when no
+        // characters needed encoding, owned otherwise. Either way we
+        // copy into `out` exactly once.
+        out.push_str(&urlencoding::encode(seg));
+    }
+    out
 }
 
 /// Strip protocol and trailing slash so we can compute Host vs path.
@@ -257,24 +287,54 @@ struct LocalEntry {
     mtime: SystemTime,
 }
 
-fn walk_local(root: &Path, dir: &Path, out: &mut Vec<LocalEntry>) -> Result<(), String> {
+/// Recursive vault walker for S3 sync.
+///
+/// `rel_prefix` is the forward-slash rel path of `dir` inside the vault.
+/// Threading it through the recursion (instead of recomputing via
+/// `strip_prefix` + `to_string_lossy` + `replace('\\', "/")` per file)
+/// drops the per-file allocation count from 3 to 1.
+///
+/// Other wins vs the previous version:
+/// - `entry.file_type()` reads from the DirEntry's cached attributes,
+///   avoiding the extra stat syscall that `Path::is_dir()` / `is_file()`
+///   each trigger on Windows.
+/// - `entry.metadata()` (vs `path.metadata()`) hits the same cached
+///   metadata buffer on Windows when possible — one cheaper syscall
+///   instead of a CreateFile+QueryInfo+CloseHandle dance.
+/// - Excluded-segment compare happens against the borrowed OsStr lossy
+///   view BEFORE we allocate the owned name String, so junk dirs
+///   (`.git`, `node_modules`, etc.) cost zero heap allocations.
+fn walk_local(
+    rel_prefix: &str,
+    dir: &Path,
+    out: &mut Vec<LocalEntry>,
+) -> Result<(), String> {
     let read = fs::read_dir(dir).map_err(|e| format!("read_dir {:?}: {}", dir, e))?;
     for entry in read {
         let entry = entry.map_err(|e| e.to_string())?;
-        let p = entry.path();
-        let name = entry.file_name().to_string_lossy().to_string();
-        if EXCLUDED_SEGMENTS.contains(&name.as_str()) {
+        let file_name = entry.file_name();
+        let name_lossy = file_name.to_string_lossy();
+
+        if EXCLUDED_SEGMENTS.iter().any(|s| name_lossy == *s) {
             continue;
         }
-        if p.is_dir() {
-            walk_local(root, &p, out)?;
-        } else if p.is_file() {
-            let rel = p
-                .strip_prefix(root)
-                .map_err(|e| e.to_string())?
-                .to_string_lossy()
-                .replace('\\', "/");
-            let mtime = p
+
+        let ft = match entry.file_type() {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+
+        let name = name_lossy.into_owned();
+        let rel = if rel_prefix.is_empty() {
+            name
+        } else {
+            format!("{}/{}", rel_prefix, name)
+        };
+
+        if ft.is_dir() {
+            walk_local(&rel, &entry.path(), out)?;
+        } else if ft.is_file() {
+            let mtime = entry
                 .metadata()
                 .and_then(|m| m.modified())
                 .unwrap_or(SystemTime::UNIX_EPOCH);
@@ -301,8 +361,30 @@ struct ListPage {
 fn parse_list_xml(xml: &str, prefix: &str) -> Result<ListPage, String> {
     // Tiny SAX-ish walk: just collect <Contents> blocks and read <Key>,
     // <LastModified> children, plus NextContinuationToken at the root.
+    //
+    // The previous implementation allocated a fresh String per Start /
+    // End event for the tag name. A 1000-key list response has ~6000
+    // tag events, so we were burning ~6000 transient String allocs per
+    // page just to do equality comparisons. The enum below lets us
+    // tag-match by byte slice instead, dropping that to zero.
     use quick_xml::events::Event;
     use quick_xml::Reader;
+
+    #[derive(Copy, Clone)]
+    enum Tag {
+        Key,
+        LastModified,
+        NextToken,
+        Other,
+    }
+    fn tag_for(name: &[u8]) -> Tag {
+        match name {
+            b"Key" => Tag::Key,
+            b"LastModified" => Tag::LastModified,
+            b"NextContinuationToken" => Tag::NextToken,
+            _ => Tag::Other,
+        }
+    }
 
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
@@ -311,7 +393,7 @@ fn parse_list_xml(xml: &str, prefix: &str) -> Result<ListPage, String> {
     let mut out: Vec<RemoteEntry> = Vec::new();
     let mut next_token: Option<String> = None;
     let mut in_contents = false;
-    let mut current_tag: Option<String> = None;
+    let mut current_tag: Option<Tag> = None;
     let mut cur_key: Option<String> = None;
     let mut cur_lm: Option<DateTime<Utc>> = None;
 
@@ -320,19 +402,20 @@ fn parse_list_xml(xml: &str, prefix: &str) -> Result<ListPage, String> {
             Err(e) => return Err(format!("XML parse: {}", e)),
             Ok(Event::Eof) => break,
             Ok(Event::Start(e)) => {
-                let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
-                if name == "Contents" {
+                let name = e.name();
+                let bytes = name.as_ref();
+                if bytes == b"Contents" {
                     in_contents = true;
                     cur_key = None;
                     cur_lm = None;
                 }
-                if in_contents || name == "IsTruncated" || name == "NextContinuationToken" {
-                    current_tag = Some(name);
+                if in_contents || bytes == b"NextContinuationToken" {
+                    current_tag = Some(tag_for(bytes));
                 }
             }
             Ok(Event::End(e)) => {
-                let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
-                if name == "Contents" {
+                let name = e.name();
+                if name.as_ref() == b"Contents" {
                     if let (Some(k), Some(lm)) = (cur_key.take(), cur_lm.take()) {
                         let rel = if !prefix.is_empty() && k.starts_with(prefix) {
                             k[prefix.len()..].trim_start_matches('/').to_string()
@@ -352,20 +435,19 @@ fn parse_list_xml(xml: &str, prefix: &str) -> Result<ListPage, String> {
                 current_tag = None;
             }
             Ok(Event::Text(e)) => {
-                let text = e
-                    .unescape()
-                    .map_err(|e| e.to_string())?
-                    .to_string();
-                if let Some(tag) = current_tag.as_deref() {
+                if let Some(tag) = current_tag {
+                    let text = e.unescape().map_err(|e| e.to_string())?;
                     match tag {
-                        "Key" if in_contents => cur_key = Some(text),
-                        "LastModified" if in_contents => {
+                        Tag::Key if in_contents => {
+                            cur_key = Some(text.into_owned());
+                        }
+                        Tag::LastModified if in_contents => {
                             cur_lm = DateTime::parse_from_rfc3339(&text)
                                 .ok()
                                 .map(|t| t.with_timezone(&Utc));
                         }
-                        "NextContinuationToken" => {
-                            next_token = Some(text);
+                        Tag::NextToken => {
+                            next_token = Some(text.into_owned());
                         }
                         _ => {}
                     }
@@ -375,7 +457,10 @@ fn parse_list_xml(xml: &str, prefix: &str) -> Result<ListPage, String> {
         }
         buf.clear();
     }
-    Ok(ListPage { entries: out, next_token })
+    Ok(ListPage {
+        entries: out,
+        next_token,
+    })
 }
 
 async fn list_objects(client: &reqwest::Client, s3: &S3Settings) -> Result<Vec<RemoteEntry>, String> {
@@ -693,25 +778,50 @@ pub async fn sync_vault(vault: String, s3: S3Settings) -> Result<SyncReport, Str
     // One shared Client → keeps TLS connection pool warm across hundreds
     // of requests. Without this each call to `Client::new()` was rebuilding
     // a brand-new pool of size 0 and reconnecting for every single object.
+    // Connection + read timeouts so a hung S3 doesn't lock us up forever.
     let client = Arc::new(
         reqwest::Client::builder()
             .pool_max_idle_per_host(CONCURRENT_IO * 2)
+            .tcp_keepalive(Some(std::time::Duration::from_secs(60)))
+            .timeout(std::time::Duration::from_secs(120))
+            .connect_timeout(std::time::Duration::from_secs(15))
             .build()
             .map_err(|e| format!("reqwest client: {}", e))?,
     );
     let s3_arc = Arc::new(s3);
-    let root_arc = Arc::new(root.clone());
+    let root_arc = Arc::new(root);
 
     let mut report = SyncReport::default();
 
-    // 1. Local listing
-    let mut local: Vec<LocalEntry> = Vec::new();
-    walk_local(&root, &root, &mut local)?;
+    // 1+2. Walk locally + list remotely IN PARALLEL.
+    //
+    // walk_local is sync I/O; running it directly inside this async fn
+    // would block the tokio reactor (and starve the simultaneous LIST
+    // request). spawn_blocking moves the walk onto tokio's blocking
+    // pool, freeing the reactor to drive the HTTP request concurrently.
+    // On a typical vault: local walk ~50-200 ms, remote LIST 200-800 ms
+    // — running them serially they sum, in parallel only the slower
+    // one is on the critical path.
+    let walk_task = {
+        let root_clone = root_arc.clone();
+        // Tauri 2 re-exports tokio under `tauri::async_runtime`; using
+        // that keeps us from having to add tokio as a direct dep.
+        tauri::async_runtime::spawn_blocking(move || -> Result<Vec<LocalEntry>, String> {
+            let mut local: Vec<LocalEntry> = Vec::new();
+            walk_local("", &root_clone, &mut local)?;
+            Ok(local)
+        })
+    };
+    let list_task = list_objects(&client, &s3_arc);
+    // `futures::join!` polls both concurrently; only the slower one
+    // (usually LIST over the network) sits on the critical path.
+    let (local_join, remote_res) = futures::join!(walk_task, list_task);
+    let local: Vec<LocalEntry> =
+        local_join.map_err(|e| format!("walk task: {}", e))??;
+    let remote_full = remote_res?;
+
     let local_map: HashMap<String, &LocalEntry> =
         local.iter().map(|e| (e.rel.clone(), e)).collect();
-
-    // 2. Remote listing (paginated under the hood)
-    let remote_full = list_objects(&client, &s3_arc).await?;
 
     // 2a. Cleanup: bulk-delete excluded keys in chunks of 1000 via S3
     // DeleteObjects (POST /?delete). Single request instead of one per key

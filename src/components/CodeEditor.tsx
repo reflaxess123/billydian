@@ -113,7 +113,7 @@ class CodeEditorBoundary extends React.Component<
   }
 }
 
-export const CodeEditor: React.FC<CodeEditorProps> = ({ code, language, onChange }) => {
+const CodeEditorImpl: React.FC<CodeEditorProps> = ({ code, language, onChange }) => {
   const { name: lang, grammar } = useMemo(() => resolveGrammar(language), [language]);
   const safeCode = typeof code === "string" ? code : "";
   const lineCount = useMemo(
@@ -175,3 +175,9 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ code, language, onChange
     </div>
   );
 };
+
+// Memo'd — NoteEditor parent re-renders constantly via App.tsx state
+// (sync ticks etc). Without memo, the inner react-simple-code-editor
+// reconciles its huge highlighted output on every parent render even
+// when code/language/onChange identity haven't changed.
+export const CodeEditor = React.memo(CodeEditorImpl);

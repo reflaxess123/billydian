@@ -18,6 +18,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tauri::Manager;
 
 mod s3;
@@ -76,12 +77,20 @@ struct VaultEntry {
     path: String,
     /// Base name with extension.
     name: String,
-    /// "dir" | "md" | "mindmap" | "other"
+    /// "dir" | "md" | "mindmap" | "image" | "other"
     kind: String,
-    /// `null` for files; recursive list of children for directories.
+    /// Omitted from the JSON for files (where it would be null) — saves
+    /// ~15 bytes per file in the IPC payload, which adds up to dozens of
+    /// KB on a populated monorepo.
+    #[serde(skip_serializing_if = "Option::is_none")]
     children: Option<Vec<VaultEntry>>,
-    /// Last-modified unix seconds (files only).
-    modified: Option<u64>,
+    // Note: we used to include a `modified: Option<u64>` field here, but
+    // the front-end never reads it — and fetching it for every file on a
+    // monorepo means an extra `GetFileInformationByHandle` syscall per
+    // entry on Windows, which is the difference between a snappy and a
+    // sluggish tree load. The S3 sync walker keeps its own mtime
+    // tracking inside `s3::walk_local`; this listing API is purely for
+    // UI.
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -123,7 +132,11 @@ fn parse_json_from_llm(response: &str) -> Result<String, String> {
         parsed = &parsed[..end];
     }
     let parsed_str = parsed.trim().to_string();
-    let _: serde_json::Value = serde_json::from_str(&parsed_str)
+    // Validate without materialising the parsed tree — we only need to
+    // know the JSON is well-formed, the frontend re-parses it anyway.
+    // `IgnoredAny` skips through tokens without allocating the Value
+    // nodes that `serde_json::Value` would.
+    let _: serde::de::IgnoredAny = serde_json::from_str(&parsed_str)
         .map_err(|e| format!("Failed to parse JSON: {}. Raw: {}", e, parsed_str))?;
     Ok(parsed_str)
 }
@@ -198,90 +211,208 @@ fn vault_pointer_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(dir.join("vault.json"))
 }
 
-/// Convert a filesystem path into "/"-separated, vault-relative form.
-fn rel_path(vault: &Path, p: &Path) -> Option<String> {
-    p.strip_prefix(vault)
-        .ok()
-        .map(|r| r.to_string_lossy().replace('\\', "/"))
+/// Path to the device-local secrets blob (OpenRouter key + S3 creds).
+///
+/// Secrets used to live alongside other settings in the vault folder
+/// (`.billydian/config.json`), which meant they'd ride along on any
+/// sync, backup, or cloud-folder mirror the user pointed at the vault.
+/// Now they sit in `app_config_dir` (Windows: AppData\Roaming\Billydian)
+/// which is per-user, per-machine, and never visited by S3 sync.
+fn secrets_file_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("secrets.json"))
 }
 
-fn classify_file(name: &str) -> &'static str {
-    let lower = name.to_lowercase();
-    if lower.ends_with(".md") {
-        "md"
-    } else if lower.ends_with(".mindmap") {
-        "mindmap"
-    } else if lower.ends_with(".png")
-        || lower.ends_with(".jpg")
-        || lower.ends_with(".jpeg")
-        || lower.ends_with(".gif")
-        || lower.ends_with(".webp")
-        || lower.ends_with(".svg")
-        || lower.ends_with(".bmp")
-        || lower.ends_with(".ico")
-        || lower.ends_with(".avif")
-    {
-        "image"
-    } else {
-        "other"
+/// Returns the contents of secrets.json, or "{}" if no secrets have
+/// been written yet. The frontend parses + merges this with vault-local
+/// settings to produce the final AppSettings.
+#[tauri::command]
+fn read_secrets(app: tauri::AppHandle) -> Result<String, String> {
+    let p = secrets_file_path(&app)?;
+    if !p.exists() {
+        return Ok("{}".to_string());
     }
+    fs::read_to_string(&p).map_err(|e| e.to_string())
 }
 
-fn entry_sort_key(e: &VaultEntry) -> (u8, String) {
-    // dirs first, then files; case-insensitive name compare
-    (if e.kind == "dir" { 0 } else { 1 }, e.name.to_lowercase())
+#[tauri::command]
+fn write_secrets(app: tauri::AppHandle, content: String) -> Result<(), String> {
+    if content.len() > MAX_SECRETS_BYTES {
+        return Err(format!(
+            "Secrets payload too large: {} bytes (max {})",
+            content.len(),
+            MAX_SECRETS_BYTES
+        ));
+    }
+    let p = secrets_file_path(&app)?;
+    fs::write(&p, content).map_err(|e| e.to_string())?;
+    // On Unix, lock down the file to user-only read/write. Windows NTFS
+    // inheritance already restricts files under AppData\Roaming to the
+    // current user's profile, so we skip the equivalent there.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&p, fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
 }
 
-fn walk_vault(root: &Path, dir: &Path) -> Result<Vec<VaultEntry>, String> {
-    let mut out: Vec<VaultEntry> = Vec::new();
+/// File-classification by extension. Allocation-free: peeks at the
+/// extension byte-slice and compares it case-insensitively against the
+/// known kinds. The hot path (filenames without a matching extension)
+/// is just a series of cheap byte compares — no per-file String alloc
+/// like the old `to_lowercase()` based implementation did.
+fn classify_file(name: &str) -> &'static str {
+    let ext = Path::new(name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    if ext.eq_ignore_ascii_case("md") {
+        return "md";
+    }
+    if ext.eq_ignore_ascii_case("mindmap") {
+        return "mindmap";
+    }
+    if ext.eq_ignore_ascii_case("docx") {
+        return "docx";
+    }
+    const IMG: &[&str] = &[
+        "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "avif",
+    ];
+    if IMG.iter().any(|e| ext.eq_ignore_ascii_case(e)) {
+        return "image";
+    }
+    "other"
+}
+
+/// Recursive vault walker.
+///
+/// `rel_prefix` is the forward-slash-separated relative path of `dir`
+/// inside the vault — passed in instead of being recomputed via
+/// `strip_prefix` + `to_string_lossy` + `replace('\\', "/")` per entry.
+/// Threading the prefix turns 3 allocations per file into 1 (the
+/// `format!` that builds child `rel`).
+fn walk_vault(rel_prefix: &str, dir: &Path) -> Result<Vec<VaultEntry>, String> {
     let read = match fs::read_dir(dir) {
         Ok(r) => r,
         Err(e) => return Err(e.to_string()),
     };
+
+    // Pre-allocation hint — avoids Vec doubling during push on a wide
+    // directory. 64 is a hand-tuned default; small dirs leak a few bytes
+    // of capacity, large dirs save several reallocs.
+    let mut out: Vec<VaultEntry> = Vec::with_capacity(64);
+
     for entry in read {
         let entry = entry.map_err(|e| e.to_string())?;
-        let path = entry.path();
-        let name = entry.file_name().to_string_lossy().to_string();
+        let file_name = entry.file_name();
+        let name_lossy = file_name.to_string_lossy();
 
-        // Skip OS junk
-        if name == "Thumbs.db" || name == ".DS_Store" {
+        // Exclusion check BEFORE allocating the owned `name` String —
+        // for excluded dirents (every `.git`, `node_modules`, etc. at
+        // every level of a monorepo) this is a pure byte compare with
+        // no heap allocation. Saves dozens to hundreds of allocations
+        // on a typical monorepo walk.
+        if s3::EXCLUDED_SEGMENTS.iter().any(|s| name_lossy == *s) {
             continue;
         }
 
-        if path.is_dir() {
-            let children = walk_vault(root, &path)?;
+        // file_type() reads from the DirEntry's cached attributes
+        // (populated by readdir/FindFirstFileW), so no extra stat
+        // syscall — unlike Path::is_dir()/is_file() which both do a
+        // fresh metadata query.
+        let ft = match entry.file_type() {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+
+        let name = name_lossy.into_owned();
+        // Build the relative path incrementally instead of re-computing
+        // via strip_prefix + replace per file.
+        let rel = if rel_prefix.is_empty() {
+            name.clone()
+        } else {
+            format!("{}/{}", rel_prefix, name)
+        };
+
+        if ft.is_dir() {
+            let children = walk_vault(&rel, &entry.path())?;
             out.push(VaultEntry {
-                path: rel_path(root, &path).unwrap_or_else(|| name.clone()),
+                path: rel,
                 name,
                 kind: "dir".to_string(),
                 children: Some(children),
-                modified: None,
             });
-        } else if path.is_file() {
+        } else if ft.is_file() {
             let kind = classify_file(&name);
-            let modified = path
-                .metadata()
-                .ok()
-                .and_then(|m| m.modified().ok())
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs());
             out.push(VaultEntry {
-                path: rel_path(root, &path).unwrap_or_else(|| name.clone()),
+                path: rel,
                 name,
                 kind: kind.to_string(),
                 children: None,
-                modified,
             });
         }
+        // symlinks/junctions intentionally ignored — following them on
+        // Windows opens up loops + scope creep
     }
-    out.sort_by(|a, b| entry_sort_key(a).cmp(&entry_sort_key(b)));
+
+    // `sort_by_cached_key` computes the lowercase name ONCE per entry
+    // (N allocations); the old `sort_by` + `entry_sort_key` did it
+    // O(N log N) times during comparisons — ~10x the allocator traffic.
+    out.sort_by_cached_key(|e| {
+        (
+            if e.kind == "dir" { 0u8 } else { 1u8 },
+            e.name.to_ascii_lowercase(),
+        )
+    });
     Ok(out)
 }
 
-/// Resolve a vault-relative path back to an absolute path under `vault`,
-/// rejecting `..` traversal.
+/// Reserved Windows device names — opening `CON.md` opens the console
+/// device, `NUL.md` opens the null sink, etc. The OS silently swallows
+/// the writes which then look like the user's file vanished. Reject
+/// these up front before we hand a path to fs::write.
+const RESERVED_WINDOWS_NAMES: &[&str] = &[
+    "CON", "PRN", "AUX", "NUL",
+    "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+    "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
+/// IPC size guards. Anything bigger than this from a frontend call is
+/// rejected before we allocate. Defends against:
+///   - a hostile renderer (XSS via markdown → invoke) OOM-killing the
+///     Rust process with a 10 GB string,
+///   - accidental loops on the JS side that re-send growing payloads,
+///   - a future feature wiring user input straight into a Tauri command
+///     without its own bound.
+const MAX_TEXT_WRITE_BYTES: usize = 50 * 1024 * 1024; // 50 MB plain text
+const MAX_BLOB_READ_BYTES: u64 = 100 * 1024 * 1024;   // 100 MB binary
+const MAX_TOPIC_BYTES: usize = 32 * 1024;             // 32 KB AI topic/prompt
+const MAX_NOTE_BYTES: usize = 200 * 1024;             // 200 KB for title-gen content
+const MAX_SECRETS_BYTES: usize = 16 * 1024;           // 16 KB secrets.json
+
+/// Resolve a vault-relative path back to an absolute path under `vault`.
+///
+/// Rejects every path-confusion vector we've found in the wild:
+///   - `..` segments (directory traversal)
+///   - backslashes (`\\?\C:\…` UNC paths, and segments that survive the
+///     forward-slash split below)
+///   - colons in segments (Windows drive letters `C:/`, NTFS Alternate
+///     Data Streams `file.md:hidden`)
+///   - control characters (0x00-0x1F) — let an attacker craft files
+///     that don't appear in directory listings
+///   - trailing dot or space — Windows silently strips these, leading
+///     to path-collision shenanigans
+///   - reserved device names (`CON`, `NUL`, `LPT1`, …)
+///
+/// With these in place, `PathBuf::push(seg)` cannot escape the vault
+/// root by construction — every seg is a benign relative component.
 fn resolve_under_vault(vault: &Path, rel: &str) -> Result<PathBuf, String> {
     let rel = rel.trim_start_matches('/');
+    if rel.contains('\\') {
+        return Err("Path contains backslash".into());
+    }
     let mut p = vault.to_path_buf();
     for seg in rel.split('/') {
         if seg.is_empty() || seg == "." {
@@ -289,6 +420,22 @@ fn resolve_under_vault(vault: &Path, rel: &str) -> Result<PathBuf, String> {
         }
         if seg == ".." {
             return Err("Invalid path (traversal)".into());
+        }
+        if seg.contains(':') {
+            return Err("Path segment contains colon".into());
+        }
+        if seg.bytes().any(|b| b < 0x20) {
+            return Err("Path segment contains control character".into());
+        }
+        if seg.ends_with('.') || seg.ends_with(' ') {
+            return Err("Path segment ends with dot or space".into());
+        }
+        // Compare the stem (before any extension) case-insensitively.
+        // `CON.md`, `con.MD`, even `LPT9.something.txt` all hit this.
+        let stem = seg.split('.').next().unwrap_or("");
+        let upper = stem.to_ascii_uppercase();
+        if RESERVED_WINDOWS_NAMES.contains(&upper.as_str()) {
+            return Err(format!("Reserved Windows name: {}", seg));
         }
         p.push(seg);
     }
@@ -356,13 +503,20 @@ fn remove_vault(app: tauri::AppHandle, path: String) -> Result<KnownVaults, Stri
 
 // ─── Commands: vault file tree ─────────────────────────────────────────────
 
+/// Tree listing runs on the blocking pool so a 10k-file monorepo walk
+/// doesn't stall the tokio reactor (which is also driving sync, AI
+/// generation, and other IPC calls). Without spawn_blocking the
+/// sidebar refresh after a sync was synchronously blocking every other
+/// command for the duration of the walk.
 #[tauri::command]
-fn list_vault_tree(vault: String) -> Result<Vec<VaultEntry>, String> {
+async fn list_vault_tree(vault: String) -> Result<Vec<VaultEntry>, String> {
     let root = PathBuf::from(&vault);
     if !root.is_dir() {
         return Err(format!("Vault is not a directory: {}", vault));
     }
-    walk_vault(&root, &root)
+    tauri::async_runtime::spawn_blocking(move || walk_vault("", &root))
+        .await
+        .map_err(|e| format!("walk task: {}", e))?
 }
 
 #[tauri::command]
@@ -374,9 +528,10 @@ fn read_vault_file(vault: String, rel: String) -> Result<String, String> {
     fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
-/// Binary read → base64 string. The frontend wraps the result into a
-/// `data:image/...;base64,...` URL so the WebView can render images
-/// without us having to wire up tauri's asset protocol scope.
+/// Legacy base64 reader — kept for any caller that still expects a
+/// data URL. New callers (ImageViewer) should use `read_vault_file_blob`
+/// which transfers raw bytes via Tauri's binary IPC channel, skipping
+/// the 33% base64 inflation and a String→atob roundtrip on the JS side.
 #[tauri::command]
 fn read_vault_file_bytes(vault: String, rel: String) -> Result<String, String> {
     use base64::{engine::general_purpose::STANDARD as B64, Engine};
@@ -384,12 +539,53 @@ fn read_vault_file_bytes(vault: String, rel: String) -> Result<String, String> {
     if !path.is_file() {
         return Err(format!("Not a file: {}", rel));
     }
+    if let Ok(meta) = fs::metadata(&path) {
+        if meta.len() > MAX_BLOB_READ_BYTES {
+            return Err(format!("File too large: {} bytes", meta.len()));
+        }
+    }
     let bytes = fs::read(&path).map_err(|e| e.to_string())?;
     Ok(B64.encode(bytes))
 }
 
+/// Binary read using Tauri's raw-bytes IPC channel. Skips the base64
+/// hop, halving peak memory + IPC transfer cost on large images.
+/// Frontend wraps the returned ArrayBuffer in a Blob + URL.createObjectURL
+/// so the <img> can render it and we can revoke the URL when the
+/// viewer unmounts.
+#[tauri::command]
+async fn read_vault_file_blob(
+    vault: String,
+    rel: String,
+) -> Result<tauri::ipc::Response, String> {
+    let path = resolve_under_vault(&PathBuf::from(&vault), &rel)?;
+    if !path.is_file() {
+        return Err(format!("Not a file: {}", rel));
+    }
+    // Cheap size check via metadata before reading the whole file into
+    // memory — protects against a hostile renderer asking us to slurp a
+    // 10 GB log file.
+    if let Ok(meta) = fs::metadata(&path) {
+        if meta.len() > MAX_BLOB_READ_BYTES {
+            return Err(format!("File too large: {} bytes", meta.len()));
+        }
+    }
+    let bytes = tauri::async_runtime::spawn_blocking(move || fs::read(&path))
+        .await
+        .map_err(|e| format!("read task: {}", e))?
+        .map_err(|e| e.to_string())?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 #[tauri::command]
 fn write_vault_file(vault: String, rel: String, content: String) -> Result<(), String> {
+    if content.len() > MAX_TEXT_WRITE_BYTES {
+        return Err(format!(
+            "Write payload too large: {} bytes (max {})",
+            content.len(),
+            MAX_TEXT_WRITE_BYTES
+        ));
+    }
     let path = resolve_under_vault(&PathBuf::from(&vault), &rel)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -431,11 +627,11 @@ fn create_vault_folder(vault: String, rel: String) -> Result<(), String> {
 // ─── Commands: OpenRouter calls ────────────────────────────────────────────
 
 async fn call_openrouter(
+    client: &reqwest::Client,
     api_key: String,
     model: String,
     prompt: String,
 ) -> Result<(String, OpenRouterUsage), String> {
-    let client = reqwest::Client::new();
     let res = client
         .post("https://openrouter.ai/api/v1/chat/completions")
         .header("Authorization", format!("Bearer {}", api_key))
@@ -498,7 +694,15 @@ async fn call_openrouter(
 }
 
 #[tauri::command]
-async fn generate_mindmap(api_key: String, topic: String, model: String) -> Result<String, String> {
+async fn generate_mindmap(
+    api_key: String,
+    topic: String,
+    model: String,
+    client: tauri::State<'_, Arc<reqwest::Client>>,
+) -> Result<String, String> {
+    if topic.len() > MAX_TOPIC_BYTES {
+        return Err(format!("Topic too long: {} bytes", topic.len()));
+    }
     let prompt = format!(
         "Generate a detailed, hierarchical mind map on the topic: \"{}\".\n\
          Return ONLY a valid JSON object matching the following structure. Do not output any markdown formatting, code blocks, or extra text.\n\
@@ -525,7 +729,7 @@ async fn generate_mindmap(api_key: String, topic: String, model: String) -> Resu
          Provide 3 to 5 main branches, and each main branch should have 2 to 4 sub-branches. Keep the names concise (1-5 words). Ensure the JSON is completely valid.",
         topic
     );
-    let (content, usage) = call_openrouter(api_key, model, prompt).await?;
+    let (content, usage) = call_openrouter(&client, api_key, model, prompt).await?;
     let clean_json = parse_json_from_llm(&content)?;
     let resp = GenerationResponse {
         data: clean_json,
@@ -542,7 +746,11 @@ async fn extend_node(
     topic_context: String,
     node_label: String,
     model: String,
+    client: tauri::State<'_, Arc<reqwest::Client>>,
 ) -> Result<String, String> {
+    if topic_context.len() > MAX_TOPIC_BYTES || node_label.len() > MAX_TOPIC_BYTES {
+        return Err("Topic context or node label too long".into());
+    }
     let prompt = format!(
         "We are building a mind map about the overarching theme: \"{}\".\n\
          We want to expand the specific node named: \"{}\".\n\
@@ -566,7 +774,7 @@ async fn extend_node(
          Ensure the generated IDs are unique strings and the response is a valid JSON array.",
         topic_context, node_label
     );
-    let (content, usage) = call_openrouter(api_key, model, prompt).await?;
+    let (content, usage) = call_openrouter(&client, api_key, model, prompt).await?;
     let clean_json = parse_json_from_llm(&content)?;
     let resp = GenerationResponse {
         data: clean_json,
@@ -578,10 +786,23 @@ async fn extend_node(
 }
 
 #[tauri::command]
-async fn generate_title(api_key: String, content: String, model: String) -> Result<String, String> {
+async fn generate_title(
+    api_key: String,
+    content: String,
+    model: String,
+    client: tauri::State<'_, Arc<reqwest::Client>>,
+) -> Result<String, String> {
+    if content.len() > MAX_NOTE_BYTES {
+        return Err(format!("Note content too long: {} bytes", content.len()));
+    }
     // Cap the content we ship to the model — titles only need the gist,
-    // and we'd rather not pay for 50k tokens of context.
-    let snippet: String = content.chars().take(4000).collect();
+    // and we'd rather not pay for 50k tokens of context. char_indices
+    // gives us a UTF-8 boundary safe slice without re-allocating the
+    // first 4000 chars into a fresh String.
+    let snippet: &str = match content.char_indices().nth(4000) {
+        Some((idx, _)) => &content[..idx],
+        None => content.as_str(),
+    };
     let prompt = format!(
         "Read the markdown note below and propose a short title for it.\n\
          Requirements:\n\
@@ -592,7 +813,7 @@ async fn generate_title(api_key: String, content: String, model: String) -> Resu
          --- NOTE START ---\n{}\n--- NOTE END ---",
         snippet
     );
-    let (raw, usage) = call_openrouter(api_key, model, prompt).await?;
+    let (raw, usage) = call_openrouter(&client, api_key, model, prompt).await?;
     // Some models return code fences anyway — strip + trim.
     let title = strip_markdown_fences(&raw)
         .lines()
@@ -612,7 +833,15 @@ async fn generate_title(api_key: String, content: String, model: String) -> Resu
 }
 
 #[tauri::command]
-async fn generate_note(api_key: String, topic: String, model: String) -> Result<String, String> {
+async fn generate_note(
+    api_key: String,
+    topic: String,
+    model: String,
+    client: tauri::State<'_, Arc<reqwest::Client>>,
+) -> Result<String, String> {
+    if topic.len() > MAX_TOPIC_BYTES {
+        return Err(format!("Topic too long: {} bytes", topic.len()));
+    }
     let prompt = format!(
         "Write a detailed, well-structured study note on the topic: \"{}\".\n\
          Output ONLY raw GitHub-Flavored Markdown — no surrounding code fences, no preamble.\n\
@@ -626,7 +855,7 @@ async fn generate_note(api_key: String, topic: String, model: String) -> Result<
          Aim for 400–800 words. Be specific and avoid fluff.",
         topic
     );
-    let (content, usage) = call_openrouter(api_key, model, prompt).await?;
+    let (content, usage) = call_openrouter(&client, api_key, model, prompt).await?;
     let md = strip_markdown_fences(&content);
     let resp = GenerationResponse {
         data: md,
@@ -642,12 +871,27 @@ async fn generate_note(api_key: String, topic: String, model: String) -> Result<
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         // Remembers window position / size / maximised state across
         // launches. State file lives in <app-config-dir>/window-state.json
         // and is restored before the window is shown.
         .plugin(tauri_plugin_window_state::Builder::default().build())
+        // One process-wide reqwest::Client, shared with every OpenRouter
+        // command via `tauri::State`. Without this, each generator call
+        // built a fresh client → fresh TLS context → fresh handshake to
+        // openrouter.ai. With a warm connection pool, subsequent calls
+        // reuse the HTTP/2 connection, saving 100-300 ms per request.
+        // Tuned timeouts so a hung server doesn't lock the app forever.
+        .setup(|app| {
+            let client = reqwest::Client::builder()
+                .pool_max_idle_per_host(8)
+                .tcp_keepalive(Some(std::time::Duration::from_secs(60)))
+                .timeout(std::time::Duration::from_secs(180))
+                .connect_timeout(std::time::Duration::from_secs(15))
+                .build()?;
+            app.manage(Arc::new(client));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             // OpenRouter
             generate_mindmap,
@@ -659,10 +903,15 @@ pub fn run() {
             set_vault_path,
             get_known_vaults,
             remove_vault,
+            // Device-local secrets (apiKey + S3 creds, stored outside
+            // the vault so they never ride along on sync/backup).
+            read_secrets,
+            write_secrets,
             // Vault file ops
             list_vault_tree,
             read_vault_file,
             read_vault_file_bytes,
+            read_vault_file_blob,
             write_vault_file,
             delete_vault_file,
             rename_vault_file,

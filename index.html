@@ -2,9 +2,16 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <link rel="icon" type="image/png" href="/icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tauri + React + Typescript</title>
+    <!-- Hint Windows 11 / macOS / Linux WMs about our preferred title-bar
+         tint when the user toggles theme. We render decorations:false in
+         Tauri so the system bar never shows, but the taskbar's accent
+         pickup still honors these. -->
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#0e0e11" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f3f3f6" media="(prefers-color-scheme: light)" />
+    <title>Billydian</title>
   </head>
 
   <body>

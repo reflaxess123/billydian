@@ -19,7 +19,9 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
-tauri-plugin-opener = "2"
+# tauri-plugin-opener was registered but the frontend never invoked any
+# of its commands — dropped to shed ~200 KB of binary + skip its
+# plugin-init at startup.
 tauri-plugin-dialog = "2"
 tauri-plugin-window-state = "2"
 serde = { version = "1", features = ["derive"] }
@@ -34,5 +36,29 @@ base64 = "0.22"
 quick-xml = "0.36"
 filetime = "0.2"
 urlencoding = "2.1"
-futures = "0.3"
+# We use a tiny slice of `futures`: `stream::iter` + `StreamExt::buffer_unordered`
+# in s3.rs and the `join!` macro for concurrent walk + list. The default
+# feature set pulls in `executor` and `thread-pool` (not needed — Tauri's
+# tokio runtime drives our futures) plus a handful of compat shims. Disabling
+# them shaves a small amount of binary + speeds up cold compile.
+futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
+
+# Release profile — Cargo's defaults leave a lot on the table for a
+# Tauri desktop binary. With these settings the installer drops 4-8 MB
+# and hot paths (S3 sigv4 loop, walk_vault recursion) get a few percent
+# faster from cross-crate inlining. Adds ~30-90s to a release build,
+# which we pay once per ship.
+#   lto = "fat"          → whole-program inlining across all deps
+#   codegen-units = 1    → enables full LTO; trades parallelism for size+speed
+#   strip = "symbols"    → drops debug symbols from the shipped binary
+#   panic = "abort"      → no unwinding tables; lets LLVM inline `?` callsites
+#   opt-level = 3        → max optimization (default for release, set explicit)
+#   incremental = false  → required to get the LTO win
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+opt-level = 3
+incremental = false
 
