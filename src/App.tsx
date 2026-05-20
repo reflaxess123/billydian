@@ -681,9 +681,9 @@ function App() {
             <div className="welcome-overlay">
               <div className="welcome-content">
                 <div className="welcome-logo">
-                  <img src="/icon.png" alt="BillyDian" />
+                  <img src="/icon.png" alt="Billydian" />
                 </div>
-                <h1>Welcome to BillyDian</h1>
+                <h1>Welcome to Billydian</h1>
                 <p>
                   Pick a folder to use as your vault. All your notes and mind
                   maps live there as plain files — <code>.md</code> for notes,{" "}
@@ -699,7 +699,7 @@ function App() {
             <div className="welcome-overlay">
               <div className="welcome-content">
                 <div className="welcome-logo">
-                  <img src="/icon.png" alt="BillyDian" />
+                  <img src="/icon.png" alt="Billydian" />
                 </div>
                 <h1>Vault ready</h1>
                 <p>

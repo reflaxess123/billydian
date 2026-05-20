@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "BillyDian",
+  "productName": "Billydian",
   "version": "0.1.0",
   "identifier": "com.refla.tauri-app",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "BillyDian",
+        "title": "Billydian",
         "width": 1280,
         "height": 820,
         "minWidth": 980,

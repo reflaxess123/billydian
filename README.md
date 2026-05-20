@@ -1,4 +1,4 @@
-# BillyDian
+# Billydian
 
 Vault-based notes + AI mind maps on top of OpenRouter. Pick a folder —
 `.md` files become rendered notes (with KaTeX math), `.mindmap` files
@@ -9,7 +9,7 @@ Built with Tauri 2 + React 19 + d3-hierarchy + react-markdown.
 
 ## Install
 
-Grab the latest `BillyDian_<version>_x64-setup.exe` from the
+Grab the latest `Billydian_<version>_x64-setup.exe` from the
 [Releases](https://github.com/reflaxess123/billydian/releases) page and
 run it. Per-user install (no admin needed). Windows 10/11 x64.
 
