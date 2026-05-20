@@ -358,7 +358,8 @@ html, body {
 .gen-input-row .api-input { flex: 1 1 auto; }
 .gen-submit-btn {
   appearance: none;
-  width: 34px;
+  width: 36px;
+  height: 36px;
   border: none;
   background: var(--accent);
   color: var(--accent-fg);
