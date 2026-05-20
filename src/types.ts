@@ -115,3 +115,17 @@ export const EMPTY_SECRETS: DeviceSecrets = {
     prefix: "",
   },
 };
+
+// Result of an S3 sync run. Returned by the `sync_vault` Tauri command.
+export interface SyncReport {
+  uploaded: number;
+  downloaded: number;
+  skipped: number;
+  deleted: number;
+  errors: string[];
+}
+
+// Subset of AppSettings that lives inside the vault's config.json.
+// Excludes the secrets (apiKey, s3) which live in the device-local
+// secrets blob.
+export type VaultLocalSettings = Omit<AppSettings, "apiKey" | "s3">;

@@ -1,6 +1,6 @@
 [package]
 name = "tauri-app"
-version = "0.1.0"
+version = "0.1.1"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -19,9 +19,10 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
-# tauri-plugin-opener was registered but the frontend never invoked any
-# of its commands — dropped to shed ~200 KB of binary + skip its
-# plugin-init at startup.
+# Opens external URLs in the OS default browser. A global click
+# listener in App.tsx intercepts every http(s) anchor and routes it
+# through this plugin so the WebView2 itself never navigates away.
+tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-window-state = "2"
 serde = { version = "1", features = ["derive"] }
@@ -61,4 +62,3 @@ strip = "symbols"
 panic = "abort"
 opt-level = 3
 incremental = false
-

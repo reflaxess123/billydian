@@ -14,7 +14,6 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { AppSettings, VaultEntry } from "../types";
-import { SyncReport } from "../App";
 import { FolderTree } from "./FolderTree";
 
 type NewKind = "note" | "mindmap";
@@ -40,8 +39,6 @@ interface SidebarProps {
   onSync: () => void;
   s3Ready: boolean;
   syncing: boolean;
-  syncReport: SyncReport | null;
-  syncError: string | null;
 }
 
 const SCALE_STEP = 0.1;
@@ -71,8 +68,6 @@ const SidebarImpl: React.FC<SidebarProps> = ({
   onSync,
   s3Ready,
   syncing,
-  syncReport,
-  syncError,
 }) => {
   const [topic, setTopic] = useState("");
   // The AI generator now only produces mind maps; plain notes are
@@ -124,19 +119,32 @@ const SidebarImpl: React.FC<SidebarProps> = ({
     onSettingsChange({ ...settings, uiScale: clamped });
   };
 
-  const submitGenerate = (e: React.FormEvent) => {
-    e.preventDefault();
+  const submitGenerate = (e?: React.SyntheticEvent) => {
+    e?.preventDefault();
     const t = topic.trim();
     if (!t) return;
     onGenerate(GEN_KIND, t);
     setTopic("");
   };
 
+  // Enter inside the generate input acts as submit (no surrounding <form>
+  // since the input and submit button live in different grid cells now).
+  const onTopicKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") submitGenerate(e);
+  };
+
   return (
     <aside className="sidebar">
       <div className="sidebar-content">
-        {/* Top row: scale +/-, theme switch */}
-        <div className="sidebar-top-row">
+        {/* Sync progress + result + errors all flow through the global
+            ToastContainer now — no inline UI here. */}
+
+        {/* Pixel-perfect controls grid.
+            Column 1: 1fr (scale cluster / vault picker / topic input).
+            Columns 2-3: compact icon buttons, so the right edge of every
+            row aligns exactly. */}
+        <div className="sidebar-controls">
+          {/* Row 1, col 1 — scale */}
           <div className="scale-cluster" role="group" aria-label="UI scale">
             <button
               className="scale-btn"
@@ -158,170 +166,143 @@ const SidebarImpl: React.FC<SidebarProps> = ({
               <ZoomIn size={13} />
             </button>
           </div>
-          {/* Right cluster: sync feedback label (sits LEFT of the sync
-              icon when present) + sync button + theme switch. The label
-              auto-dismisses ~3 s after a sync completes, but fades out
-              gracefully via CSS, not abruptly. */}
-          <div className="sidebar-top-actions">
-            {(syncing || syncReport || syncError) && (
-              <span
-                className={`sync-inline${syncError ? " err" : syncing ? " busy" : " ok"}`}
-                title={syncError ?? "Last sync result"}
-              >
-                {syncing ? (
-                  "Syncing…"
-                ) : syncError ? (
-                  <span className="sync-inline-text">
-                    {syncError.length > 32 ? syncError.slice(0, 29) + "…" : syncError}
-                  </span>
-                ) : syncReport ? (
-                  <>
-                    ↑<strong>{syncReport.uploaded}</strong>{" "}
-                    ↓<strong>{syncReport.downloaded}</strong>{" "}
-                    ={syncReport.skipped}
-                    {syncReport.deleted > 0 && (
-                      <> 🗑<strong>{syncReport.deleted}</strong></>
-                    )}
-                    {syncReport.errors.length > 0 && (
-                      <> ⚠{syncReport.errors.length}</>
-                    )}
-                  </>
-                ) : null}
-              </span>
-            )}
-            <button
-              className="theme-icon-btn sync-btn"
-              onClick={onSync}
-              disabled={!s3Ready || syncing}
-              title={
-                !s3Ready
-                  ? "Fill in S3 settings to enable sync"
-                  : syncing
-                  ? "Syncing…"
-                  : "Sync vault with S3"
-              }
-              aria-label="Sync vault"
-            >
-              <RefreshCw size={15} className={syncing ? "spin" : ""} />
-            </button>
-            <button
-              className="theme-icon-btn"
-              onClick={toggleTheme}
-              title={settings.theme === "dark" ? "Switch to light" : "Switch to dark"}
-              aria-label="Toggle theme"
-            >
-              {settings.theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
-            </button>
-          </div>
-        </div>
 
-        {/* Vault row: picker chip + new-note `+` to its right.
-            The chip is a dropdown trigger when known vaults exist —
-            shows the list with Active marker, remove × per row, and
-            "Add another…" at the bottom. */}
-        <div className="vault-row" ref={vaultMenuRef}>
+          {/* Row 1, col 2 — sync */}
           <button
-            className={`vault-pick-btn${vaultMenuOpen ? " open" : ""}`}
-            onClick={handleVaultClick}
-            title={vaultPath ?? "Pick a vault folder"}
+            className="theme-icon-btn sync-btn"
+            onClick={onSync}
+            disabled={!s3Ready || syncing}
+            title={
+              !s3Ready
+                ? "Fill in S3 settings to enable sync"
+                : syncing
+                ? "Syncing…"
+                : "Sync vault with S3"
+            }
+            aria-label="Sync vault"
           >
-            <FolderOpen size={14} />
-            <span className="vault-pick-label">
-              {vaultPath ? basename(vaultPath) : "Pick vault…"}
-            </span>
-            {knownVaults.length > 0 && (
-              <ChevronDown
-                size={13}
-                className={`vault-pick-chev${vaultMenuOpen ? " open" : ""}`}
-              />
-            )}
+            <RefreshCw size={15} className={syncing ? "spin" : ""} />
           </button>
-          {vaultPath && (
-            <button
-              type="button"
-              className="vault-new-btn"
-              onClick={onCreateBlankNote}
-              title="New blank note"
-              aria-label="New blank note"
-            >
-              <Plus size={14} />
-            </button>
-          )}
+          {/* Row 1, col 3 — theme */}
+          <button
+            className="theme-icon-btn"
+            onClick={toggleTheme}
+            title={settings.theme === "dark" ? "Switch to light" : "Switch to dark"}
+            aria-label="Toggle theme"
+          >
+            {settings.theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+          </button>
 
-          {vaultMenuOpen && (
-            <div className="vault-menu" role="listbox">
-              {knownVaults.map((p) => {
-                const active = p === vaultPath;
-                return (
-                  <div
-                    key={p}
-                    className={`vault-menu-item${active ? " active" : ""}`}
-                    role="option"
-                    aria-selected={active}
-                    onClick={() => {
-                      if (!active) onActivateVault(p);
-                      setVaultMenuOpen(false);
-                    }}
-                  >
-                    <FolderOpen size={13} className="vault-menu-icon" />
-                    <span className="vault-menu-text" title={p}>
-                      <span className="vault-menu-name">{basename(p)}</span>
-                      <span className="vault-menu-path">{p}</span>
-                    </span>
-                    {active && <Check size={13} className="vault-menu-check" />}
-                    {!active && (
-                      <button
-                        type="button"
-                        className="vault-menu-remove"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onRemoveVault(p);
-                        }}
-                        title="Forget this vault"
-                        aria-label="Forget this vault"
-                      >
-                        <X size={11} />
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
+          {/* Row 2, col 1 — vault picker (relative anchor for dropdown) */}
+          <div className="vault-row" ref={vaultMenuRef}>
+            <button
+              className={`vault-pick-btn${vaultMenuOpen ? " open" : ""}`}
+              onClick={handleVaultClick}
+              title={vaultPath ?? "Pick a vault folder"}
+            >
+              <FolderOpen size={14} />
+              <span className="vault-pick-label">
+                {vaultPath ? basename(vaultPath) : "Pick vault…"}
+              </span>
+              {knownVaults.length > 0 && (
+                <ChevronDown
+                  size={13}
+                  className={`vault-pick-chev${vaultMenuOpen ? " open" : ""}`}
+                />
+              )}
+            </button>
+
+            {vaultMenuOpen && (
+              <div className="vault-menu" role="listbox">
+                {knownVaults.map((p) => {
+                  const active = p === vaultPath;
+                  return (
+                    <div
+                      key={p}
+                      className={`vault-menu-item${active ? " active" : ""}`}
+                      role="option"
+                      aria-selected={active}
+                      onClick={() => {
+                        if (!active) onActivateVault(p);
+                        setVaultMenuOpen(false);
+                      }}
+                    >
+                      <FolderOpen size={13} className="vault-menu-icon" />
+                      <span className="vault-menu-text" title={p}>
+                        <span className="vault-menu-name">{basename(p)}</span>
+                        <span className="vault-menu-path">{p}</span>
+                      </span>
+                      {active && <Check size={13} className="vault-menu-check" />}
+                      {!active && (
+                        <button
+                          type="button"
+                          className="vault-menu-remove"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onRemoveVault(p);
+                          }}
+                          title="Forget this vault"
+                          aria-label="Forget this vault"
+                        >
+                          <X size={11} />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+                <button
+                  type="button"
+                  className="vault-menu-add"
+                  onClick={() => {
+                    setVaultMenuOpen(false);
+                    onPickVault();
+                  }}
+                >
+                  <Plus size={13} /> Add another vault…
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Row 2, col 2 — new note. Always rendered (disabled when
+              no vault) so the column doesn't collapse and the row
+              keeps its compact row height. */}
+          <button
+            type="button"
+            className="vault-new-btn"
+            onClick={onCreateBlankNote}
+            disabled={!vaultPath}
+            title="New blank note"
+            aria-label="New blank note"
+          >
+            <Plus size={14} />
+          </button>
+
+          {/* Row 3 — only when a vault is open */}
+          {vaultPath && (
+            <>
+              <input
+                type="text"
+                value={topic}
+                onChange={(e) => setTopic(e.target.value)}
+                onKeyDown={onTopicKeyDown}
+                placeholder="Mind map topic…"
+                className="api-input gen-input"
+                disabled={isGenerating}
+              />
               <button
                 type="button"
-                className="vault-menu-add"
-                onClick={() => {
-                  setVaultMenuOpen(false);
-                  onPickVault();
-                }}
+                className="gen-submit-btn"
+                onClick={submitGenerate}
+                disabled={isGenerating || !topic.trim()}
+                title="Generate mind map via AI"
+                aria-label="Generate mind map"
               >
-                <Plus size={13} /> Add another vault…
+                <Sparkles size={13} />
               </button>
-            </div>
+            </>
           )}
         </div>
-
-        {/* Mind-map generator — single input + AI sparkle */}
-        {vaultPath && (
-          <form className="gen-input-row" onSubmit={submitGenerate}>
-            <input
-              type="text"
-              value={topic}
-              onChange={(e) => setTopic(e.target.value)}
-              placeholder="Mind map topic…"
-              className="api-input"
-              disabled={isGenerating}
-            />
-            <button
-              type="submit"
-              className="gen-submit-btn"
-              disabled={isGenerating || !topic.trim()}
-              title="Generate mind map via AI"
-              aria-label="Generate mind map"
-            >
-              <Sparkles size={13} />
-            </button>
-          </form>
-        )}
 
         {/* Tree */}
         <div className="vault-tree-wrap">
@@ -341,7 +322,10 @@ const SidebarImpl: React.FC<SidebarProps> = ({
 
         {/* Bottom: settings modal trigger */}
         <button className="sidebar-settings-btn" onClick={onOpenSettings}>
-          <SettingsIcon size={14} /> Settings
+          <span className="sidebar-settings-inner">
+            <SettingsIcon size={14} />
+            <span>Settings</span>
+          </span>
         </button>
       </div>
     </aside>

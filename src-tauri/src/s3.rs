@@ -29,7 +29,7 @@ use md5::Md5;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -726,10 +726,11 @@ fn content_type_for(key: &str) -> &'static str {
 }
 
 fn snippet(s: &str, n: usize) -> String {
-    if s.len() > n {
-        format!("{}…", &s[..n])
-    } else {
-        s.to_string()
+    // Walk to a char boundary so we never panic on multi-byte UTF-8
+    // (S3/Yandex error bodies routinely contain non-ASCII reasons).
+    match s.char_indices().nth(n) {
+        Some((idx, _)) => format!("{}…", &s[..idx]),
+        None => s.to_string(),
     }
 }
 
@@ -759,7 +760,11 @@ fn diag_headers(res: &reqwest::Response) -> String {
 // ─── Public command: sync_vault ────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn sync_vault(vault: String, s3: S3Settings) -> Result<SyncReport, String> {
+pub async fn sync_vault(
+    app: tauri::AppHandle,
+    vault: String,
+    s3: S3Settings,
+) -> Result<SyncReport, String> {
     if s3.bucket.trim().is_empty()
         || s3.access_key_id.trim().is_empty()
         || s3.secret_access_key.trim().is_empty()
@@ -770,10 +775,11 @@ pub async fn sync_vault(vault: String, s3: S3Settings) -> Result<SyncReport, Str
             "All S3 fields (endpoint, region, bucket, key id, secret) are required.".into(),
         );
     }
-    let root = PathBuf::from(&vault);
-    if !root.is_dir() {
-        return Err(format!("Vault is not a directory: {}", vault));
-    }
+    // Reject any vault not in the registered list. Without this an attacker
+    // who can reach the frontend (XSS, dev tools, etc.) could turn
+    // sync_vault into a generic credentialed S3 push from any folder on
+    // the user's machine.
+    let root = crate::vault_mgmt::verify_vault(&app, &vault)?;
 
     // One shared Client → keeps TLS connection pool warm across hundreds
     // of requests. Without this each call to `Client::new()` was rebuilding

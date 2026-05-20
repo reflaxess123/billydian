@@ -183,8 +183,8 @@ html, body {
 .sidebar {
   width: 300px;
   flex-shrink: 0;
-  background: var(--bg-elevated);
-  border-right: 1px solid var(--border);
+  background: var(--bg);
+  border-right: none;
   display: flex;
   height: 100%;
   z-index: 10;
@@ -199,25 +199,53 @@ html, body {
   flex: 1 1 auto;
 }
 
-.sidebar-top-row {
+/* ─── Sidebar controls grid ─────────────────────────────────────────
+   Pixel-perfect 3-column layout for the sidebar header.
+
+   Col 1 (1fr): scale cluster, vault picker, topic input
+   Col 2 (28px): sync btn (row 1 only)
+   Col 3 (28px): theme btn (row 1) / new-note btn (row 2) / sparkle (row 3)
+
+   Rows 2 and 3 don't fill col 2 — instead their left cell spans cols
+   1+2, so the vault picker / topic input grow wider while their
+   trailing button still sits in col 3 with its RIGHT edge aligned to
+   the theme button's right edge above. Every cell is 28px tall so the
+   row baselines match.
+*/
+.sidebar-controls {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px 28px;
+  column-gap: 5px;
+  row-gap: 5px;
+  align-items: stretch;
+}
+
+/* Vault row and topic input span the first two columns so their
+   trailing button (+ / sparkle) lands in col 3 — same right edge as
+   the theme button above. */
+.sidebar-controls > .vault-row,
+.sidebar-controls > .api-input.gen-input {
+  grid-column: 1 / span 2;
+}
+
+/* Whole-UI scale buttons — left cell of row 1, fills its column. */
+.scale-cluster {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-8);
-}
-
-/* Whole-UI scale buttons */
-.scale-cluster {
-  display: inline-flex;
-  align-items: center;
   background: var(--surface);
   border-radius: var(--radius-sm);
   padding: 2px;
-  gap: 2px;
+  height: 28px;
+  width: 100%;
+  min-width: 0;
 }
 .scale-btn {
   appearance: none;
-  width: 26px; height: 26px;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
   background: transparent;
   border: none;
   color: var(--muted);
@@ -229,18 +257,18 @@ html, body {
 .scale-btn:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
 .scale-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 .scale-readout {
+  flex: 1 1 auto;
   font: 700 10px / 1 inherit;
   color: var(--muted);
   letter-spacing: 0.3px;
   font-variant-numeric: tabular-nums;
-  min-width: 30px;
   text-align: center;
 }
 
 .theme-icon-btn {
   appearance: none;
-  flex-shrink: 0;
-  width: 32px; height: 32px;
+  width: 100%;
+  height: 28px;
   background: var(--surface);
   border: none;
   border-radius: var(--radius-sm);
@@ -252,134 +280,71 @@ html, body {
 .theme-icon-btn:hover:not(:disabled) {
   background: var(--hover);
   color: var(--fg);
-  transform: rotate(20deg);
 }
 .theme-icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-/* Sync button: same chassis as theme; no rotation on hover so the spin
-   animation doesn't fight a transform. */
-.theme-icon-btn.sync-btn:hover:not(:disabled) { transform: none; }
 
-/* Right-side cluster: sync feedback (when present) + sync btn + theme */
-.sidebar-top-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-/* Inline sync feedback — sits to the LEFT of the sync icon. Same
-   height as the surrounding 32 px buttons so the row baseline doesn't
-   shift when it appears. */
-.sync-inline {
-  height: 32px;
-  padding: 0 10px;
-  font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
-  line-height: 1;
-  border-radius: var(--radius-sm);
-  white-space: nowrap;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  max-width: 240px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  /* Animation: appear via opacity+slide; the exit transition is on the
-     same properties (no animation), driven by React unmount. */
-  animation: syncInlineIn 0.18s var(--ease-out);
-  transition: opacity 0.4s var(--ease-out), transform 0.4s var(--ease-out);
-}
-@keyframes syncInlineIn {
-  from { opacity: 0; transform: translateX(6px); }
-  to   { opacity: 1; transform: translateX(0); }
-}
-/* Three states share the layout but pick different fills.
-   `ok` paints the text in `--accent` (lime in dark, near-black in
-   light) — the user wants the result chip's value to be the brand
-   colour. */
-.sync-inline.busy {
-  background: var(--surface);
-  color: var(--muted);
-}
-.sync-inline.ok {
-  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
-  color: var(--accent);
-}
-.sync-inline.err {
-  background: color-mix(in srgb, var(--danger) 14%, transparent);
-  color: var(--danger);
-}
-.sync-inline strong {
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  margin: 0 1px;
-  color: inherit;
-}
-.sync-inline.ok strong { color: var(--accent); }
-.sync-inline-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Vault row + gen-input row share the same horizontal layout so the
-   sidebar reads as one consistent stack: stretch-tall siblings, fixed
-   36px square trailing button, identical 6px gap.
-
-   Grid (not flex) is used here on purpose — flex's basis calculation
-   on the leading element was reading the chip's icon+label vs the
-   input's placeholder text as different content widths, and after the
-   grow/shrink pass the two rows came out sub-pixel-wider on different
-   sides. Grid with `1fr 36px` is fully deterministic: column 1 is
-   always `container − gap − 36px`, regardless of content. */
-.vault-row,
-.gen-input-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 36px;
-  gap: 6px;
-  align-items: stretch;
-  margin: 0;
-  padding: 0;
-}
 /* vault-row hosts the dropdown menu inside its layout so that
-   `position: absolute` on the menu anchors to it. */
-.vault-row { position: relative; }
-.vault-row .vault-pick-btn,
-.gen-input-row > .api-input {
-  width: 100%;
-  height: 36px;
-  padding: 0 12px;
+   `position: absolute` on the menu anchors to it. The grid handles
+   sizing — vault-row is just a relative wrapper. */
+.vault-row {
+  position: relative;
+  display: block;
+  min-width: 0;
 }
-.vault-new-btn {
+.vault-new-btn,
+.gen-submit-btn {
   appearance: none;
-  flex-shrink: 0;
-  width: 36px;
-  height: 36px;
-  background: var(--surface);
+  width: 100%;
+  height: 28px;
   border: none;
   border-radius: var(--radius-sm);
-  color: var(--muted);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.12s var(--ease-out), color 0.12s var(--ease-out);
+  transition: background 0.12s var(--ease-out), color 0.12s var(--ease-out), filter 0.15s var(--ease-out);
+  padding: 0;
 }
-.vault-new-btn:hover { background: var(--hover); color: var(--fg); }
+.vault-new-btn {
+  background: var(--surface);
+  color: var(--muted);
+}
+.vault-new-btn:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
+.vault-new-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.gen-submit-btn {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.gen-submit-btn:hover:not(:disabled) { filter: brightness(1.05); }
+.gen-submit-btn:disabled { background: var(--surface); color: var(--muted); cursor: not-allowed; }
 
-/* Vault picker chip */
+/* Vault picker chip — fills column 1 of row 2 */
 .vault-pick-btn {
   appearance: none;
+  width: 100%;
+  height: 28px;
   background: var(--surface);
   border: none;
   color: var(--fg);
   text-align: left;
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 8px 10px;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 0 9px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   font: 600 var(--text-xs) / 1 inherit;
   transition: background 0.15s var(--ease-out);
 }
 .vault-pick-btn:hover { background: var(--hover); }
+
+/* Topic input — fills column 1 of row 3. `.gen-input` is the marker
+   class so the broader `.api-input` rules (used in settings modal)
+   don't fight the grid-set width. */
+.sidebar-controls .api-input.gen-input {
+  width: 100%;
+  height: 28px;
+  padding: 0 9px;
+  font-size: var(--text-xs);
+}
 .vault-pick-label {
   flex: 1 1 auto;
   min-width: 0;
@@ -493,25 +458,6 @@ html, body {
 .vault-menu-add:hover { background: var(--hover); }
 .vault-menu-add svg { color: var(--muted); }
 
-/* Mind-map generator — single input + AI sparkle, no kind toggle */
-.gen-input-row { display: flex; gap: 4px; align-items: stretch; }
-.gen-input-row .api-input { flex: 1 1 auto; }
-.gen-submit-btn {
-  appearance: none;
-  width: 36px;
-  height: 36px;
-  border: none;
-  background: var(--accent);
-  color: var(--accent-fg);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  display: inline-flex; align-items: center; justify-content: center;
-  transition: filter 0.15s var(--ease-out);
-  flex-shrink: 0;
-}
-.gen-submit-btn:hover:not(:disabled) { filter: brightness(1.05); }
-.gen-submit-btn:disabled { background: var(--surface); color: var(--muted); cursor: not-allowed; }
-
 /* ===== Vault tree ===== */
 .vault-tree-wrap {
   flex: 1 1 auto;
@@ -580,16 +526,15 @@ html, body {
   gap: 4px;
   height: 26px;
   padding-right: 6px;
-  border-radius: var(--radius-sm);
   color: var(--fg);
   cursor: pointer;
   user-select: none;
-  transition: background 0.12s var(--ease-out), color 0.12s var(--ease-out);
+  transition: color 0.12s var(--ease-out);
 }
-.tree-row:hover { background: var(--hover); }
+.tree-row:hover { background: transparent; }
 .tree-row.active {
-  background: var(--accent);
-  color: var(--accent-fg);
+  background: transparent;
+  color: var(--fg);
 }
 .tree-row.dotted { opacity: 0.65; }
 .tree-row.dotted.active { opacity: 1; }
@@ -624,14 +569,38 @@ html, body {
   min-height: 0;
 }
 
+.tree-entry-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  height: 22px;
+  padding: 0 7px;
+  margin-left: -3px;
+  border-radius: var(--radius-sm);
+  transition: background 0.12s var(--ease-out), color 0.12s var(--ease-out);
+}
+.tree-row--file .tree-entry-pill {
+  max-width: calc(100% - 24px);
+}
+.tree-row:hover .tree-entry-pill { background: var(--hover); }
+.tree-row.active .tree-entry-pill {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.tree-row.active:hover .tree-entry-pill {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
 .tree-icon { display: inline-flex; flex-shrink: 0; color: var(--muted); }
 .tree-row.active .tree-icon { color: var(--accent-fg); }
-/* Icons stay monochrome — colour the row, not the icon. */
+/* Icons stay monochrome — colour the compact label, not the whole row. */
 
 .tree-name {
   font-size: var(--text-xs);
   font-weight: 500;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
@@ -653,8 +622,8 @@ html, body {
 }
 .tree-row:hover .tree-delete { opacity: 1; }
 .tree-delete:hover { background: var(--danger); color: #fff; }
-.tree-row.active .tree-delete { color: var(--accent-fg); }
-.tree-row.active .tree-delete:hover { background: rgba(0,0,0,0.18); color: var(--accent-fg); }
+.tree-row.active .tree-delete { color: var(--muted); }
+.tree-row.active .tree-delete:hover { background: var(--danger); color: #fff; }
 
 /* Old sidebar token panel removed — counters live per-file inside the
    canvas / note footer now. */
@@ -662,18 +631,37 @@ html, body {
 /* Settings button at bottom */
 .sidebar-settings-btn {
   appearance: none;
+  width: 100%;
   background: var(--surface);
   border: none;
   color: var(--fg);
   font: 600 var(--text-xs) / 1 inherit;
-  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 10px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background 0.15s var(--ease-out);
 }
 .sidebar-settings-btn:hover { background: var(--hover); }
-.sidebar-settings-btn svg { color: var(--muted); }
+.sidebar-settings-inner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  line-height: 1;
+}
+.sidebar-settings-btn svg {
+  display: block;
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.sidebar-settings-inner span {
+  display: block;
+  line-height: 1;
+}
 
 /* ===== Generic inputs ===== */
 .input-group { position: relative; display: flex; }
@@ -866,87 +854,6 @@ html, body {
 .spin { animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* S3 sync feedback row */
-.sync-feedback {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font: 500 var(--text-xs) / 1.3 inherit;
-  padding: 6px 10px;
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--muted);
-}
-.sync-feedback strong {
-  color: var(--fg);
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-.sync-feedback.ok { color: var(--muted); }
-.sync-feedback.ok svg { color: var(--ok); }
-.sync-feedback.err {
-  background: color-mix(in srgb, var(--danger) 12%, var(--bg-elevated));
-  color: var(--danger);
-}
-.sync-feedback.err svg { flex-shrink: 0; }
-.sync-feedback-err { color: var(--danger); font-weight: 700; }
-
-.sync-errors {
-  font-size: var(--text-xs);
-  color: var(--danger);
-  margin-top: 6px;
-}
-.sync-errors summary {
-  cursor: pointer;
-  user-select: none;
-  font-weight: 600;
-}
-.sync-errors ul {
-  margin: 6px 0 0;
-  padding-left: 20px;
-  max-height: 160px;
-  overflow-y: auto;
-}
-.sync-errors li {
-  font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
-  line-height: 1.4;
-  color: var(--danger);
-  word-break: break-all;
-  white-space: pre-wrap;
-}
-
-.sync-error-box {
-  background: color-mix(in srgb, var(--danger) 10%, var(--bg-elevated));
-  border: 1px solid var(--danger);
-  border-radius: var(--radius-md);
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.sync-error-head {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font: 700 var(--text-xs) / 1 inherit;
-  color: var(--danger);
-}
-.sync-error-box pre {
-  font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
-  line-height: 1.45;
-  color: var(--fg);
-  background: var(--bg);
-  border-radius: var(--radius-sm);
-  padding: 8px 10px;
-  margin: 0;
-  max-height: 280px;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
 .grid-2 {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -979,10 +886,8 @@ html, body {
 }
 
 /* ===== Note view ===========================================
-   Stack of three rounded cards (title / content / footer), all
-   constrained to the same `.note-card` max-width — the slider in the
-   title-card adjusts the shared width var via inline `style`. The whole
-   stack scrolls inside `.note-view`. */
+   Title, content, and footer share the same constrained width while
+   rendering directly on the workspace background. */
 .note-view {
   flex: 1 1 auto;
   min-height: 0;
@@ -1028,28 +933,28 @@ html, body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-12);
-  padding: var(--space-20) var(--space-20) var(--space-24);
+  gap: 0;
+  padding: var(--space-24) var(--space-24) var(--space-24);
 }
 
 .note-card {
   width: 100%;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-card);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
   box-sizing: border-box;
   /* Animate width changes when the user clicks a different level dot.
      Keep the easing snappy (~280ms) so it feels responsive, not lazy. */
   transition: max-width 0.28s var(--ease-out);
 }
 
-/* ── Title card ── */
+/* ── Title row ── */
 .note-title-card {
   display: flex;
   align-items: center;
   gap: var(--space-16);
-  padding: 18px 22px;
+  padding: 0 0 18px;
 }
 .note-title-block {
   flex: 1 1 auto;
@@ -1078,7 +983,7 @@ html, body {
   font-style: normal;
   font-variant: normal;
   line-height: 1.15;
-  letter-spacing: -0.5px;
+  letter-spacing: 0;
   color: var(--fg);
   text-rendering: inherit;
   -webkit-font-smoothing: inherit;
@@ -1107,17 +1012,15 @@ html, body {
   flex-shrink: 0;
 }
 
-/* Discrete width levels — sit in a single grouped chip alongside the
-   Wand and Eye/Pencil buttons. Each level is a rounded-square button
-   (same idiom as `.note-icon-btn` next to it), not a circle, so the
-   row reads as a cohesive cluster. */
+/* Discrete width levels sit inline with the title actions without a
+   separate chip background. */
 .width-levels {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  padding: 2px;
-  background: var(--surface);
-  border-radius: var(--radius-sm);
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
   height: 32px;
 }
 .width-level {
@@ -1133,25 +1036,26 @@ html, body {
   justify-content: center;
   font: 700 11px / 1 inherit;
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.2px;
+  letter-spacing: 0;
   transition: background 0.12s var(--ease-out), color 0.12s var(--ease-out);
 }
 .width-level:hover { background: var(--hover); color: var(--fg); }
 .width-level.active {
-  background: var(--accent);
-  color: var(--accent-fg);
+  background: transparent;
+  color: var(--accent);
+  box-shadow: inset 0 -2px 0 currentColor;
 }
 .width-level.active:hover {
-  background: var(--accent);
-  color: var(--accent-fg);
-  filter: brightness(1.05);
+  background: transparent;
+  color: var(--accent);
+  filter: none;
 }
 
 .note-icon-btn,
 .note-mode-toggle {
   appearance: none;
   width: 32px; height: 32px;
-  background: var(--surface);
+  background: transparent;
   border: none;
   color: var(--muted);
   border-radius: var(--radius-sm);
@@ -1160,20 +1064,20 @@ html, body {
   transition: background 0.12s var(--ease-out), color 0.12s var(--ease-out);
 }
 .note-icon-btn:hover:not(:disabled),
-.note-mode-toggle:hover { background: var(--hover); color: var(--fg); }
+.note-mode-toggle:hover { background: transparent; color: var(--fg); }
 .note-icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .note-mode-toggle.active {
-  background: var(--accent);
-  color: var(--accent-fg);
+  background: transparent;
+  color: var(--accent);
 }
 .note-mode-toggle.active:hover {
-  background: var(--accent); color: var(--accent-fg);
-  filter: brightness(1.05);
+  background: transparent; color: var(--accent);
+  filter: none;
 }
 
-/* ── Content card ── */
+/* ── Content surface ── */
 .note-content-card {
-  padding: 24px 28px 28px;
+  padding: 0 0 28px;
   display: flex;
 }
 .note-textarea {
@@ -1249,7 +1153,7 @@ html, body {
 .note-code {
   width: 100%;
   background: transparent;
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   overflow-x: auto;
 }
 
@@ -1261,12 +1165,12 @@ html, body {
 .code-block > pre { margin: 0 !important; }
 .code-copy-btn {
   position: absolute;
-  top: 6px;
-  right: 6px;
+  top: 0;
+  right: 0;
   width: 24px; height: 24px;
-  background: color-mix(in srgb, var(--bg-elevated) 90%, transparent);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
   color: var(--muted);
   cursor: pointer;
   display: inline-flex;
@@ -1284,13 +1188,13 @@ html, body {
   opacity: 1;
   transform: scale(1);
 }
-.code-copy-btn:hover { background: var(--accent); color: var(--accent-fg); }
+.code-copy-btn:hover { background: transparent; color: var(--accent); }
 .code-copy-btn.copied {
   opacity: 1;
   transform: scale(1);
-  background: var(--ok);
-  color: var(--accent-fg);
-  border-color: var(--ok);
+  background: transparent;
+  color: var(--ok);
+  border-color: transparent;
 }
 
 /* === Editable code surface (react-simple-code-editor + raw Prism) ===
@@ -1430,16 +1334,16 @@ html, body {
   background: transparent !important;
   text-shadow: none !important;
 }
-/* Same treatment for code blocks rendered inside markdown previews. */
+/* Code blocks render on the same background as surrounding Markdown. */
 .note-preview pre[class*="language-"] {
-  background: var(--surface) !important;
-  border-radius: var(--radius-md);
-  padding: 12px 14px;
+  background: transparent !important;
+  border-radius: 0;
+  padding: 0;
   margin: 0 0 14px;
   font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", SFMono-Regular, Menlo, monospace !important;
 }
 .dark .note-preview pre[class*="language-"] {
-  background: var(--surface) !important;
+  background: transparent !important;
 }
 
 /* ─── Image viewer ──────────────────────────────────────────────────
@@ -1667,13 +1571,13 @@ html, body {
 }
 .dark .footer-lang strong { color: var(--accent) !important; }
 
-/* ── Footer card: location + content stats ── */
+/* ── Footer row: location + content stats ── */
 .note-footer-card {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-12);
-  padding: 12px 18px;
+  padding: 12px 0 0;
 }
 .note-footer-loc {
   display: inline-flex;
@@ -1710,7 +1614,7 @@ html, body {
   color: var(--accent);
 }
 .dark .note-footer-stats .footer-tokens strong { color: var(--accent); }
-.note-preview h1 { font-size: 1.9rem; font-weight: 800; letter-spacing: -0.5px; margin: 0 0 14px; }
+.note-preview h1 { font-size: 1.9rem; font-weight: 800; letter-spacing: 0; margin: 0 0 14px; }
 .note-preview h2 { font-size: 1.45rem; font-weight: 700; margin: 26px 0 10px; }
 .note-preview h3 { font-size: 1.15rem; font-weight: 700; margin: 22px 0 8px; }
 .note-preview h4, .note-preview h5, .note-preview h6 { font-size: 1rem; font-weight: 700; margin: 18px 0 6px; }
@@ -1734,18 +1638,18 @@ html, body {
 .note-preview code {
   font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", SFMono-Regular, Menlo, monospace;
   font-size: 0.88em;
-  background: var(--surface);
-  padding: 1px 6px;
-  border-radius: 4px;
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
   /* Inline `code` spans get the same break-anywhere as the parent —
      ensures long backtick-wrapped strings (URLs, tokens, file paths)
      break inside the card instead of pushing it sideways. */
   overflow-wrap: anywhere;
 }
 .note-preview pre {
-  background: var(--surface);
-  border-radius: var(--radius-md);
-  padding: 12px 14px;
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
   overflow-x: auto;
   margin: 0 0 14px;
 }
@@ -1784,9 +1688,9 @@ html, body {
 /* Fallback render for code blocks too large for Prism (>32KB). Same
    visual treatment as the highlighted variant minus the colour. */
 .code-block-plain {
-  background: var(--surface);
-  border-radius: var(--radius-md);
-  padding: 12px 14px;
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
   overflow-x: auto;
   margin: 0;
   font: 13px/1.55 "JetBrains Mono", ui-monospace, "Cascadia Code", SFMono-Regular, Menlo, monospace;
@@ -1918,14 +1822,14 @@ html, body {
   display: flex; align-items: center;
   cursor: pointer;
   transform-origin: 0 50%;
-  /* Promote each node to its own compositor layer so Chromium picks an
-     appropriate raster scale per node — without this, the parent
-     `.canvas-transform-layer` rasterizes at 1× and the GPU just scales
-     the bitmap, which goes visibly blurry past ~2× zoom. The audit
-     warned about a soft compositor-layer ceiling at 200+ nodes; in
-     practice the visual win on every mindmap people actually use
-     outweighs the rare ceiling case. */
-  will-change: transform;
+  /* No `will-change: transform` here on purpose. Promoting each node
+     to its own compositor layer made Chromium rasterize them at 1× and
+     then GPU-scale the bitmap when the parent's transform changed —
+     visibly blurry until a :hover paint invalidation forced a re-raster.
+     Without the hint, nodes live in the parent's raster pass and are
+     redrawn crisply at whatever zoom level the parent is currently at.
+     Drag perf stays fine because we mutate the parent's transform via
+     refs+rAF (see MindMapCanvas), so only the parent layer composites. */
   transition:
     transform 0.35s var(--ease-out),
     border-color 0.15s var(--ease-out),
@@ -2141,51 +2045,94 @@ html, body {
 }
 .app-loader-overlay p { color: var(--muted); font-size: var(--text-base); font-weight: 500; }
 
-.error-banner {
-  position: absolute;
-  top: var(--space-16);
-  left: 50%;
-  transform: translateX(-50%);
-  background: color-mix(in srgb, var(--danger) 10%, var(--bg-elevated));
-  border: 1.5px solid var(--danger);
-  color: var(--danger);
+/* ===== Toast notifications (top-right stack) ===== */
+.toast-container {
+  position: fixed;
+  /* Drag-strip titlebar is 36px tall and owns the top-right with the
+     minimize/maximize/close buttons. Park the stack underneath it
+     with a small breathing gap so toasts never cover the controls. */
+  top: calc(36px + 8px);
+  right: var(--space-16);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+  max-width: 360px;
+  width: max-content;
+}
+.toast {
+  pointer-events: auto;
+  display: grid;
+  grid-template-columns: 18px 1fr 18px;
+  align-items: center;
+  gap: 10px;
+  min-width: 240px;
+  max-width: 360px;
   padding: 10px 12px;
   border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--fg);
   font: 500 var(--text-sm) / 1.35 inherit;
-  display: inline-flex;
-  align-items: flex-start;
-  gap: var(--space-8);
-  max-width: 640px;
-  width: calc(100% - 80px);
-  z-index: 20;
-  box-shadow: 0 6px 18px color-mix(in srgb, var(--danger) 20%, transparent);
-  animation: slideDown 0.3s var(--ease-spring);
-}
-.error-banner > svg { flex-shrink: 0; margin-top: 2px; }
-.error-banner span {
-  flex: 1 1 auto;
+  box-shadow: 0 10px 28px color-mix(in srgb, #000 28%, transparent);
+  animation: toastIn 0.22s var(--ease-spring);
   word-break: break-word;
-  white-space: pre-wrap;
-  max-height: 160px;
-  overflow-y: auto;
 }
-.error-close-btn {
+/* Exit class swaps the keyframes so onAnimationEnd in ToastContainer
+   knows to remove the row from the DOM only when slideOut finishes. */
+.toast.toast-exit {
+  animation: toastOut 0.18s var(--ease-out) forwards;
+}
+@keyframes toastIn {
+  from { opacity: 0; transform: translateX(24px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes toastOut {
+  from { opacity: 1; transform: translateX(0); max-height: 80px; margin-bottom: 0; }
+  to   { opacity: 0; transform: translateX(24px); max-height: 0; margin-bottom: -8px; padding-top: 0; padding-bottom: 0; border-width: 0; }
+}
+.toast-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.toast-message {
+  min-width: 0;
+  white-space: pre-wrap;
+}
+.toast-close {
   appearance: none;
   background: transparent;
   border: none;
-  color: var(--danger);
+  color: var(--muted);
   cursor: pointer;
-  width: 22px; height: 22px;
-  flex-shrink: 0;
-  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 4px;
-  transition: background 0.15s var(--ease-out);
+  padding: 0;
+  transition: background 0.12s var(--ease-out), color 0.12s var(--ease-out);
 }
-.error-close-btn:hover { background: color-mix(in srgb, var(--danger) 18%, transparent); }
-@keyframes slideDown {
-  from { transform: translate(-50%, -16px); opacity: 0; }
-  to   { transform: translate(-50%, 0); opacity: 1; }
+.toast-close:hover { background: var(--hover); color: var(--fg); }
+
+/* Kind-specific accents. The left icon picks up the accent colour, the
+   rest of the toast stays neutral so a stack of errors doesn't read as
+   one giant red wall. */
+.toast-info .toast-icon { color: var(--accent); }
+.toast-success {
+  border-color: color-mix(in srgb, var(--ok, #4ade80) 50%, var(--border));
 }
+.toast-success .toast-icon { color: var(--ok, #4ade80); }
+.toast-error {
+  border-color: color-mix(in srgb, var(--danger) 60%, var(--border));
+  background: color-mix(in srgb, var(--danger) 8%, var(--bg-elevated));
+}
+.toast-error .toast-icon { color: var(--danger); }
+.toast-progress .toast-icon { color: var(--accent); }
 
 /* ===== Welcome ===== */
 .welcome-overlay {
@@ -2250,3 +2197,35 @@ html, body {
 }
 .welcome-submit-btn:hover { filter: brightness(1.05); }
 .welcome-submit-btn:active { transform: translateY(1px); }
+
+/* ─── Viewer error boundary ─────────────────────────────────────────── */
+.viewer-error-boundary {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  gap: 12px;
+  text-align: center;
+  color: var(--fg);
+  background: var(--bg);
+}
+.viewer-error-boundary svg {
+  color: var(--danger, #d97706);
+  margin-bottom: 4px;
+}
+.viewer-error-boundary h2 {
+  margin: 0;
+  font: 600 var(--text-xl) / 1.2 inherit;
+}
+.viewer-error-boundary p {
+  margin: 0;
+  max-width: 520px;
+  color: var(--fg-muted);
+  font: 400 var(--text-base) / 1.5 inherit;
+}
+.viewer-error-hint {
+  font-size: var(--text-sm);
+  opacity: 0.7;
+}

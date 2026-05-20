@@ -164,28 +164,44 @@ const ImageViewerImpl: React.FC<ImageViewerProps> = ({ vaultPath, relPath, alt }
     e.preventDefault();
     setDragging(true);
     dragStartRef.current = {
-      x: e.clientX - translate.x,
-      y: e.clientY - translate.y,
+      x: e.clientX - txRef.current,
+      y: e.clientY - tyRef.current,
     };
   };
 
+  // Drag goes through imgRef.style + rAF instead of setTranslate per
+  // mousemove. setState on every mousemove was rerendering the whole
+  // viewer at 60-120 Hz; now React only sees one commit on mouseup.
   useEffect(() => {
     if (!dragging) return;
-    const onMove = (e: MouseEvent) => {
-      setTranslate({
-        x: e.clientX - dragStartRef.current.x,
-        y: e.clientY - dragStartRef.current.y,
-      });
+    let raf = 0;
+    let pendingX = txRef.current;
+    let pendingY = tyRef.current;
+    const apply = () => {
+      raf = 0;
+      txRef.current = pendingX;
+      tyRef.current = pendingY;
+      const el = imgRef.current;
+      if (el) {
+        el.style.transform = `translate(calc(-50% + ${pendingX}px), calc(-50% + ${pendingY}px)) scale(${scaleRef.current})`;
+      }
     };
-    // Drop the `e.button === 1` guard — any mouseup clears dragging.
-    // Otherwise a mouseup of a different button (e.g. tracking mouse
-    // jitter) leaves dragging stuck on and the cursor "grabbing."
-    const onUp = () => setDragging(false);
+    const onMove = (e: MouseEvent) => {
+      pendingX = e.clientX - dragStartRef.current.x;
+      pendingY = e.clientY - dragStartRef.current.y;
+      if (raf === 0) raf = requestAnimationFrame(apply);
+    };
+    const onUp = () => {
+      if (raf) cancelAnimationFrame(raf);
+      setTranslate({ x: pendingX, y: pendingY });
+      setDragging(false);
+    };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
     return () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      if (raf) cancelAnimationFrame(raf);
     };
   }, [dragging]);
 

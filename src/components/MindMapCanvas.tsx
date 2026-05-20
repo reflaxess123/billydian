@@ -98,12 +98,17 @@ const MindMapCanvasImpl: React.FC<MindMapCanvasProps> = ({
     };
   }, []);
 
-  // Mouse drag-to-pan using the Middle Mouse Button (wheel click, e.button === 1)
+  // Mouse drag-to-pan using the Middle Mouse Button (wheel click, e.button === 1).
+  // Drag does NOT go through React state — every mouse-move at 60-120 Hz
+  // would otherwise re-render the whole canvas (and reconcile 500 nodes).
+  // Instead: write the new transform directly to canvasRef via rAF, then
+  // commit a single setState on mouseup so wheel-zoom etc. still see
+  // fresh values via the live `tx/tyRef`s.
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.button === 1) {
       e.preventDefault();
       setIsDragging(true);
-      dragStart.current = { x: e.clientX - translateX, y: e.clientY - translateY };
+      dragStart.current = { x: e.clientX - txRef.current, y: e.clientY - tyRef.current };
       if (containerRef.current) {
         containerRef.current.style.cursor = "grabbing";
       }
@@ -111,29 +116,45 @@ const MindMapCanvasImpl: React.FC<MindMapCanvasProps> = ({
   };
 
   useEffect(() => {
-    const handleWindowMouseMove = (e: MouseEvent) => {
-      if (!isDragging) return;
-      setTranslateX(e.clientX - dragStart.current.x);
-      setTranslateY(e.clientY - dragStart.current.y);
-    };
+    if (!isDragging) return;
+    let raf = 0;
+    let pendingX = txRef.current;
+    let pendingY = tyRef.current;
 
-    const handleWindowMouseUp = (e: MouseEvent) => {
-      if (e.button === 1) {
-        setIsDragging(false);
-        if (containerRef.current) {
-          containerRef.current.style.cursor = "default";
-        }
+    const apply = () => {
+      raf = 0;
+      txRef.current = pendingX;
+      tyRef.current = pendingY;
+      const el = canvasRef.current;
+      if (el) {
+        el.style.transform = `translate(${pendingX}px, ${pendingY}px) scale(${scaleRef.current})`;
       }
     };
 
-    if (isDragging) {
-      window.addEventListener("mousemove", handleWindowMouseMove);
-      window.addEventListener("mouseup", handleWindowMouseUp);
-    }
+    const onMove = (e: MouseEvent) => {
+      pendingX = e.clientX - dragStart.current.x;
+      pendingY = e.clientY - dragStart.current.y;
+      if (raf === 0) raf = requestAnimationFrame(apply);
+    };
 
+    const onUp = (e: MouseEvent) => {
+      if (e.button !== 1) return;
+      if (raf) cancelAnimationFrame(raf);
+      // Single commit so React state and refs end up in sync — JSX
+      // re-renders triggered by unrelated data changes won't snap the
+      // canvas back to a stale position.
+      setTranslateX(pendingX);
+      setTranslateY(pendingY);
+      setIsDragging(false);
+      if (containerRef.current) containerRef.current.style.cursor = "default";
+    };
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
     return () => {
-      window.removeEventListener("mousemove", handleWindowMouseMove);
-      window.removeEventListener("mouseup", handleWindowMouseUp);
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      if (raf) cancelAnimationFrame(raf);
     };
   }, [isDragging]);
 
@@ -222,6 +243,38 @@ const MindMapCanvasImpl: React.FC<MindMapCanvasProps> = ({
     return 0.4;
   };
 
+  // Memoise the entire SVG path array so unrelated re-renders (drag
+  // commit, exit-animation tick, fileTokens swap, isDragging cursor
+  // change) skip the 500-link bezier-string allocation pass entirely.
+  // Only rebuilds when the d3 layout output (`links`) actually changes.
+  const linkElements = useMemo(() => {
+    const cardWidth = 184; // matches .mindmap-node width
+    return links.map((link) => {
+      const source = link.source;
+      const target = link.target;
+      const sourceId = source.data.id;
+      const targetId = target.data.id;
+      const startX = source.y + cardWidth;
+      const startY = source.x;
+      const endX = target.y;
+      const endY = target.x;
+      const cpX = startX + (endX - startX) / 2;
+      const pathData = `M ${startX} ${startY} C ${cpX} ${startY}, ${cpX} ${endY}, ${endX} ${endY}`;
+      return (
+        <path
+          key={`link-${sourceId}-${targetId}`}
+          d={pathData}
+          fill="none"
+          stroke="var(--accent)"
+          strokeOpacity={getDepthOpacity(target.depth)}
+          strokeWidth={2}
+          strokeLinecap="round"
+          className="link-path"
+        />
+      );
+    });
+  }, [links]);
+
   return (
     <div
       ref={containerRef}
@@ -239,43 +292,7 @@ const MindMapCanvasImpl: React.FC<MindMapCanvasProps> = ({
       >
         {/* SVG Links Container */}
         <svg className="mindmap-svg" style={{ overflow: "visible" }}>
-          {/* Draw connecting curves — single-color accent stroke whose
-              opacity tapers by depth so the eye follows root → leaves. */}
-          {links.map((link) => {
-            const source = link.source;
-            const target = link.target;
-            const sourceId = source.data.id;
-            const targetId = target.data.id;
-
-            // Card is 184px wide (matches .mindmap-node)
-            const cardWidth = 184;
-
-            const startX = source.y + cardWidth;
-            const startY = source.x;
-            const endX = target.y;
-            const endY = target.x;
-
-            // Smooth cubic bezier curves
-            const controlPoint1X = startX + (endX - startX) / 2;
-            const controlPoint1Y = startY;
-            const controlPoint2X = startX + (endX - startX) / 2;
-            const controlPoint2Y = endY;
-
-            const pathData = `M ${startX} ${startY} C ${controlPoint1X} ${controlPoint1Y}, ${controlPoint2X} ${controlPoint2Y}, ${endX} ${endY}`;
-
-            return (
-              <path
-                key={`link-${sourceId}-${targetId}`}
-                d={pathData}
-                fill="none"
-                stroke="var(--accent)"
-                strokeOpacity={getDepthOpacity(target.depth)}
-                strokeWidth={2}
-                strokeLinecap="round"
-                className="link-path"
-              />
-            );
-          })}
+          {linkElements}
         </svg>
 
         {/* Nodes Container */}

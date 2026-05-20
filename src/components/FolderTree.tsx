@@ -151,8 +151,8 @@ const VirtualRowImpl: React.FC<VirtualRowProps> = ({
   const { entry, depth, isExpandedDir } = row;
   const isActive = activePath === entry.path && entry.kind !== "dir";
 
-  // Monochrome icons — colour comes from .tree-row state, not the icon
-  // itself, so the sidebar stays calm.
+  // Monochrome icons — colour comes from the compact row label state,
+  // not the icon itself, so the sidebar stays calm.
   const icon = (() => {
     if (entry.kind === "dir") {
       return isExpandedDir ? <FolderOpen size={14} /> : <Folder size={14} />;
@@ -165,7 +165,9 @@ const VirtualRowImpl: React.FC<VirtualRowProps> = ({
 
   return (
     <div
-      className={`tree-row${isActive ? " active" : ""}${
+      className={`tree-row${entry.kind !== "dir" ? " tree-row--file" : ""}${
+        isActive ? " active" : ""
+      }${
         entry.name.startsWith(".") ? " dotted" : ""
       }`}
       style={{
@@ -186,8 +188,10 @@ const VirtualRowImpl: React.FC<VirtualRowProps> = ({
         />
       )}
       {entry.kind !== "dir" && <span className="tree-chev-spacer" />}
-      <span className="tree-icon">{icon}</span>
-      <span className="tree-name">{entry.name}</span>
+      <span className="tree-entry-pill">
+        <span className="tree-icon">{icon}</span>
+        <span className="tree-name">{entry.name}</span>
+      </span>
       {entry.kind !== "dir" && (
         <button
           className="tree-delete"

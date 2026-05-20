@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Eye, EyeOff, X, Cpu, Key, Cloud, RefreshCw, CheckCircle2, AlertTriangle } from "lucide-react";
+import { Eye, EyeOff, X, Cpu, Key, Cloud, RefreshCw } from "lucide-react";
 import { AppSettings } from "../types";
-import { SyncReport } from "../App";
 
 interface SettingsModalProps {
   settings: AppSettings;
@@ -11,8 +10,6 @@ interface SettingsModalProps {
   vaultPath: string | null;
   s3Ready: boolean;
   syncing: boolean;
-  syncReport: SyncReport | null;
-  syncError: string | null;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -23,8 +20,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   vaultPath,
   s3Ready,
   syncing,
-  syncReport,
-  syncError,
 }) => {
   const [showKey, setShowKey] = useState(false);
   const [showS3Secret, setShowS3Secret] = useState(false);
@@ -241,41 +236,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <RefreshCw size={13} className={syncing ? "spin" : ""} />
                 {syncing ? "Syncing…" : "Sync now"}
               </button>
-              {syncReport && !syncing && (
-                <div className="sync-feedback ok">
-                  <CheckCircle2 size={14} />
-                  <span>
-                    ↑ <strong>{syncReport.uploaded}</strong>
-                    {"  ·  "}↓ <strong>{syncReport.downloaded}</strong>
-                    {"  ·  "}= <strong>{syncReport.skipped}</strong>
-                    {syncReport.deleted > 0 && (
-                      <>{"  ·  "}🗑 <strong>{syncReport.deleted}</strong></>
-                    )}
-                    {syncReport.errors.length > 0 && (
-                      <>{"  ·  "}<span className="sync-feedback-err">⚠ {syncReport.errors.length}</span></>
-                    )}
-                  </span>
-                </div>
-              )}
+              {/* Sync result + errors now flow through global toasts. */}
             </div>
-            {syncError && !syncing && (
-              <div className="sync-error-box">
-                <div className="sync-error-head">
-                  <AlertTriangle size={14} /> Sync failed
-                </div>
-                <pre>{syncError}</pre>
-              </div>
-            )}
-            {syncReport && syncReport.errors.length > 0 && (
-              <details className="sync-errors" open>
-                <summary>Errors ({syncReport.errors.length})</summary>
-                <ul>
-                  {syncReport.errors.map((e, i) => (
-                    <li key={i}>{e}</li>
-                  ))}
-                </ul>
-              </details>
-            )}
           </section>
         </div>
 
