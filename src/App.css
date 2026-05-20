@@ -310,12 +310,18 @@ html, body {
 }
 /* Both leading elements share an identical box so the visible space
    between content and the trailing button is the same in either row.
-   The 2 px right-padding difference between .api-input and
-   .vault-pick-btn was reading as a different gap. */
+   `flex: 1 1 0` forces a zero flex-basis on both — the previous
+   `flex: 1 1 auto` was letting the natural content width of the input
+   (placeholder text ~150 px) compete with the chip's (icon+label
+   ~80 px), and after the grow phase the input ended up sub-pixel-
+   wider on Chromium. Resetting `width: auto` strips the input's
+   inherited `width: 100%`, which on a flex-row child also leaks into
+   the basis calculation. */
 .vault-row .vault-pick-btn,
 .gen-input-row > .api-input {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
+  width: auto;
   height: 36px;
   padding: 0 12px;
 }
