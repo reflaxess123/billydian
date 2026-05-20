@@ -20,14 +20,25 @@
 // "whoever's mtime is bigger wins"; a future pass could maintain a
 // last-synced manifest to flag true conflicts.
 
+use base64::engine::{general_purpose::STANDARD as B64, Engine};
 use chrono::{DateTime, Datelike, Timelike, Utc};
 use filetime::{set_file_mtime, FileTime};
+use futures::stream::{self, StreamExt};
 use hmac::{Hmac, Mac};
+use md5::Md5;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Per-key network concurrency. Default reqwest pool size handles
+/// 16 idle connections per host comfortably; bump higher and you start
+/// hitting Yandex rate-limits.
+const CONCURRENT_IO: usize = 16;
+/// S3 DeleteObjects caps at 1000 keys per call.
+const DELETE_BATCH: usize = 1000;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -176,13 +187,18 @@ fn sign(
         access_key, credential_scope, signed_headers, signature
     );
 
-    // Dev-mode dump: when sync misbehaves, the canonical request + the
-    // signed string are the first things you want to eyeball.
+    // Dev-mode dump kept available behind an env var so the stderr
+    // log doesn't drown in 1000+ canonical requests during a big sync.
+    // Run with `BILLYDIAN_LOG_SIGV4=1 npm run tauri dev` if you need it.
     #[cfg(debug_assertions)]
-    {
+    if std::env::var("BILLYDIAN_LOG_SIGV4").is_ok() {
         eprintln!("─── SigV4 ───");
-        eprintln!("URL\t{}://{}{}{}{}", "https", host, canonical_uri,
-            if canonical_query.is_empty() { "" } else { "?" }, canonical_query);
+        eprintln!(
+            "URL\thttps://{}{}{}{}",
+            host, canonical_uri,
+            if canonical_query.is_empty() { "" } else { "?" },
+            canonical_query
+        );
         eprintln!("Canonical request:\n{}", canonical_request);
         eprintln!("String to sign:\n{}", string_to_sign);
         eprintln!("─────────────");
@@ -362,7 +378,7 @@ fn parse_list_xml(xml: &str, prefix: &str) -> Result<ListPage, String> {
     Ok(ListPage { entries: out, next_token })
 }
 
-async fn list_objects(s3: &S3Settings) -> Result<Vec<RemoteEntry>, String> {
+async fn list_objects(client: &reqwest::Client, s3: &S3Settings) -> Result<Vec<RemoteEntry>, String> {
     let (_, host, base) = parse_endpoint(&s3.endpoint)?;
     let prefix = s3.prefix.clone().unwrap_or_default();
     let prefix_for_strip = if prefix.is_empty() {
@@ -372,7 +388,6 @@ async fn list_objects(s3: &S3Settings) -> Result<Vec<RemoteEntry>, String> {
     };
 
     let canonical_uri = format!("/{}", s3.bucket);
-    let client = reqwest::Client::new();
     let mut all: Vec<RemoteEntry> = Vec::new();
     let mut continuation: Option<String> = None;
 
@@ -439,6 +454,7 @@ async fn list_objects(s3: &S3Settings) -> Result<Vec<RemoteEntry>, String> {
 // ─── S3 GET / PUT ──────────────────────────────────────────────────────────
 
 async fn get_object(
+    client: &reqwest::Client,
     s3: &S3Settings,
     key: &str,
 ) -> Result<(Vec<u8>, DateTime<Utc>), String> {
@@ -458,7 +474,6 @@ async fn get_object(
         &s3.secret_access_key,
         now,
     );
-    let client = reqwest::Client::new();
     let mut req = client.get(&url);
     for (k, v) in &headers {
         req = req.header(k, v);
@@ -485,7 +500,12 @@ async fn get_object(
     Ok((body_bytes.to_vec(), lm))
 }
 
-async fn put_object(s3: &S3Settings, key: &str, body: Vec<u8>) -> Result<(), String> {
+async fn put_object(
+    client: &reqwest::Client,
+    s3: &S3Settings,
+    key: &str,
+    body: Vec<u8>,
+) -> Result<(), String> {
     let (_, host, base) = parse_endpoint(&s3.endpoint)?;
     let canonical_uri = format!("/{}/{}", s3.bucket, encode_key(key));
     let url = format!("{}{}", base, canonical_uri);
@@ -503,7 +523,6 @@ async fn put_object(s3: &S3Settings, key: &str, body: Vec<u8>) -> Result<(), Str
         &s3.secret_access_key,
         now,
     );
-    let client = reqwest::Client::new();
     let mut req = client.put(&url).body(body);
     for (k, v) in &headers {
         req = req.header(k, v);
@@ -522,42 +541,90 @@ async fn put_object(s3: &S3Settings, key: &str, body: Vec<u8>) -> Result<(), Str
     Ok(())
 }
 
-async fn delete_object(s3: &S3Settings, key: &str) -> Result<(), String> {
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+fn md5_b64(body: &[u8]) -> String {
+    let mut h = Md5::new();
+    h.update(body);
+    B64.encode(h.finalize())
+}
+
+/// Bulk delete via POST /?delete — up to DELETE_BATCH keys per call.
+/// Returns the count of objects S3 confirmed deleted. Sequence: chunks
+/// of 1000 keys → one POST per chunk. With 8k objects in `.git/` that
+/// drops us from 8000 round-trips to 8.
+async fn delete_objects_batch(
+    client: &reqwest::Client,
+    s3: &S3Settings,
+    keys: &[String],
+) -> Result<usize, String> {
+    if keys.is_empty() {
+        return Ok(0);
+    }
+    let mut total = 0usize;
     let (_, host, base) = parse_endpoint(&s3.endpoint)?;
-    let canonical_uri = format!("/{}/{}", s3.bucket, encode_key(key));
-    let url = format!("{}{}", base, canonical_uri);
-    let now = Utc::now();
-    let headers = sign(
-        "DELETE",
-        &host,
-        &canonical_uri,
-        "",
-        b"",
-        &[],
-        &s3.region,
-        &s3.access_key_id,
-        &s3.secret_access_key,
-        now,
-    );
-    let client = reqwest::Client::new();
-    let mut req = client.delete(&url);
-    for (k, v) in &headers {
-        req = req.header(k, v);
+    let canonical_uri = format!("/{}", s3.bucket);
+    // SigV4 needs the param even when there's no value
+    let canonical_query = "delete=";
+    let url = format!("{}{}?delete=", base, canonical_uri);
+
+    for chunk in keys.chunks(DELETE_BATCH) {
+        // Build the DeleteObjects request body. `<Quiet>true` suppresses
+        // per-object success rows; we trust HTTP-2xx as a batch ack.
+        let mut body = String::from(
+            "<Delete xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Quiet>true</Quiet>",
+        );
+        for k in chunk {
+            body.push_str("<Object><Key>");
+            body.push_str(&xml_escape(k));
+            body.push_str("</Key></Object>");
+        }
+        body.push_str("</Delete>");
+        let body_bytes = body.into_bytes();
+        let md5 = md5_b64(&body_bytes);
+
+        let now = Utc::now();
+        let headers = sign(
+            "POST",
+            &host,
+            &canonical_uri,
+            canonical_query,
+            &body_bytes,
+            &[
+                ("content-type", "application/xml"),
+                ("content-md5", md5.as_str()),
+            ],
+            &s3.region,
+            &s3.access_key_id,
+            &s3.secret_access_key,
+            now,
+        );
+
+        let mut req = client.post(&url).body(body_bytes);
+        for (k, v) in &headers {
+            req = req.header(k, v);
+        }
+        let res = req
+            .send()
+            .await
+            .map_err(|e| format!("Batch DELETE request: {}", e))?;
+        let status = res.status();
+        let diag = diag_headers(&res);
+        if !status.is_success() {
+            let body = res.text().await.unwrap_or_default();
+            return Err(format!(
+                "DeleteObjects {}{} → {}\n{}",
+                url, diag, status,
+                snippet(&body, 1500)
+            ));
+        }
+        total += chunk.len();
     }
-    let res = req.send().await.map_err(|e| format!("DELETE request: {}", e))?;
-    let status = res.status();
-    let diag = diag_headers(&res);
-    // S3 returns 204 No Content on success, 404 if the key never existed.
-    // Treat 404 as success since the end state ("key not there") matches.
-    if !status.is_success() && status.as_u16() != 404 {
-        let body = res.text().await.unwrap_or_default();
-        return Err(format!(
-            "DELETE {}{} → {}\n{}",
-            url, diag, status,
-            snippet(&body, 1500)
-        ));
-    }
-    Ok(())
+    Ok(total)
 }
 
 fn content_type_for(key: &str) -> &'static str {
@@ -614,12 +681,28 @@ pub async fn sync_vault(vault: String, s3: S3Settings) -> Result<SyncReport, Str
         || s3.region.trim().is_empty()
         || s3.endpoint.trim().is_empty()
     {
-        return Err("All S3 fields (endpoint, region, bucket, key id, secret) are required.".into());
+        return Err(
+            "All S3 fields (endpoint, region, bucket, key id, secret) are required.".into(),
+        );
     }
     let root = PathBuf::from(&vault);
     if !root.is_dir() {
         return Err(format!("Vault is not a directory: {}", vault));
     }
+
+    // One shared Client → keeps TLS connection pool warm across hundreds
+    // of requests. Without this each call to `Client::new()` was rebuilding
+    // a brand-new pool of size 0 and reconnecting for every single object.
+    let client = Arc::new(
+        reqwest::Client::builder()
+            .pool_max_idle_per_host(CONCURRENT_IO * 2)
+            .build()
+            .map_err(|e| format!("reqwest client: {}", e))?,
+    );
+    let s3_arc = Arc::new(s3);
+    let root_arc = Arc::new(root.clone());
+
+    let mut report = SyncReport::default();
 
     // 1. Local listing
     let mut local: Vec<LocalEntry> = Vec::new();
@@ -627,37 +710,36 @@ pub async fn sync_vault(vault: String, s3: S3Settings) -> Result<SyncReport, Str
     let local_map: HashMap<String, &LocalEntry> =
         local.iter().map(|e| (e.rel.clone(), e)).collect();
 
-    // 2. Remote listing
-    let remote_full = list_objects(&s3).await?;
+    // 2. Remote listing (paginated under the hood)
+    let remote_full = list_objects(&client, &s3_arc).await?;
 
-    let mut report = SyncReport::default();
-
-    // 2a. Cleanup: drop any remote object whose vault-relative path
-    // crosses one of our excluded segments. Same blacklist used for the
-    // local walk — keeps `.git`, `node_modules`, OS junk, and our own
-    // `.billydian/` (creds!) out of the bucket regardless of how it
-    // got there.
+    // 2a. Cleanup: bulk-delete excluded keys in chunks of 1000 via S3
+    // DeleteObjects (POST /?delete). Single request instead of one per key
+    // is the difference between minutes and seconds when `.git/` is huge.
+    let mut to_delete: Vec<String> = Vec::new();
     let mut remote: Vec<RemoteEntry> = Vec::with_capacity(remote_full.len());
     for entry in remote_full {
         if is_excluded_rel(&entry.rel) {
-            match delete_object(&s3, &entry.key).await {
-                Ok(_) => report.deleted += 1,
-                Err(e) => report.errors.push(format!("delete {}: {}", entry.rel, e)),
-            }
+            to_delete.push(entry.key);
         } else {
             remote.push(entry);
+        }
+    }
+    if !to_delete.is_empty() {
+        match delete_objects_batch(&client, &s3_arc, &to_delete).await {
+            Ok(n) => report.deleted += n as u32,
+            Err(e) => report.errors.push(e),
         }
     }
 
     let remote_map: HashMap<String, &RemoteEntry> =
         remote.iter().map(|e| (e.rel.clone(), e)).collect();
-    let prefix = s3.prefix.clone().unwrap_or_default();
+    let prefix = s3_arc.prefix.clone().unwrap_or_default();
     let prefix_norm = if prefix.is_empty() {
         "".to_string()
     } else {
         prefix.trim_end_matches('/').to_string() + "/"
     };
-
     let make_key = |rel: &str| -> String {
         if prefix_norm.is_empty() {
             rel.to_string()
@@ -666,49 +748,30 @@ pub async fn sync_vault(vault: String, s3: S3Settings) -> Result<SyncReport, Str
         }
     };
 
-    // 3. Local-only → upload
-    for entry in &local {
-        if remote_map.contains_key(&entry.rel) {
-            continue;
-        }
-        let abs = root.join(entry.rel.replace('/', std::path::MAIN_SEPARATOR_STR));
-        match fs::read(&abs) {
-            Ok(bytes) => match put_object(&s3, &make_key(&entry.rel), bytes).await {
-                Ok(_) => report.uploaded += 1,
-                Err(e) => report.errors.push(format!("upload {}: {}", entry.rel, e)),
-            },
-            Err(e) => report.errors.push(format!("read {}: {}", entry.rel, e)),
-        }
+    // 3. Build the action plan: every needed upload/download as one item.
+    enum Action {
+        Upload { rel: String, key: String },
+        Download { rel: String, key: String },
     }
-
-    // 4. Remote-only → download
-    for entry in &remote {
-        if local_map.contains_key(&entry.rel) {
-            continue;
-        }
-        match get_object(&s3, &entry.key).await {
-            Ok((bytes, lm)) => {
-                let abs = root.join(entry.rel.replace('/', std::path::MAIN_SEPARATOR_STR));
-                if let Some(parent) = abs.parent() {
-                    let _ = fs::create_dir_all(parent);
-                }
-                match fs::write(&abs, &bytes) {
-                    Ok(_) => {
-                        // Sync local mtime to remote LastModified so we don't
-                        // immediately re-upload on the next pass.
-                        let secs = lm.timestamp().max(0) as u64;
-                        let _ = set_file_mtime(&abs, FileTime::from_unix_time(secs as i64, 0));
-                        report.downloaded += 1;
-                    }
-                    Err(e) => report.errors.push(format!("write {}: {}", entry.rel, e)),
-                }
-            }
-            Err(e) => report.errors.push(format!("download {}: {}", entry.rel, e)),
-        }
-    }
-
-    // 5. In both: compare mtimes
+    let mut actions: Vec<Action> = Vec::new();
     const SKEW_SECS: i64 = 2;
+
+    for entry in &local {
+        if !remote_map.contains_key(&entry.rel) {
+            actions.push(Action::Upload {
+                rel: entry.rel.clone(),
+                key: make_key(&entry.rel),
+            });
+        }
+    }
+    for entry in &remote {
+        if !local_map.contains_key(&entry.rel) {
+            actions.push(Action::Download {
+                rel: entry.rel.clone(),
+                key: entry.key.clone(),
+            });
+        }
+    }
     for entry in &local {
         if let Some(remote_entry) = remote_map.get(&entry.rel) {
             let local_secs = entry
@@ -720,43 +783,81 @@ pub async fn sync_vault(vault: String, s3: S3Settings) -> Result<SyncReport, Str
             let delta = local_secs - remote_secs;
             if delta.abs() <= SKEW_SECS {
                 report.skipped += 1;
-                continue;
-            }
-            if delta > 0 {
-                // local newer → upload
-                let abs = root.join(entry.rel.replace('/', std::path::MAIN_SEPARATOR_STR));
-                match fs::read(&abs) {
-                    Ok(bytes) => match put_object(&s3, &make_key(&entry.rel), bytes).await {
-                        Ok(_) => report.uploaded += 1,
-                        Err(e) => report.errors.push(format!("upload {}: {}", entry.rel, e)),
-                    },
-                    Err(e) => report.errors.push(format!("read {}: {}", entry.rel, e)),
-                }
+            } else if delta > 0 {
+                actions.push(Action::Upload {
+                    rel: entry.rel.clone(),
+                    key: make_key(&entry.rel),
+                });
             } else {
-                // remote newer → download
-                match get_object(&s3, &remote_entry.key).await {
-                    Ok((bytes, lm)) => {
-                        let abs = root.join(entry.rel.replace('/', std::path::MAIN_SEPARATOR_STR));
-                        if let Some(parent) = abs.parent() {
-                            let _ = fs::create_dir_all(parent);
-                        }
-                        match fs::write(&abs, &bytes) {
-                            Ok(_) => {
-                                let secs = lm.timestamp().max(0) as u64;
-                                let _ = set_file_mtime(
-                                    &abs,
-                                    FileTime::from_unix_time(secs as i64, 0),
-                                );
-                                report.downloaded += 1;
-                            }
-                            Err(e) => report.errors.push(format!("write {}: {}", entry.rel, e)),
+                actions.push(Action::Download {
+                    rel: entry.rel.clone(),
+                    key: remote_entry.key.clone(),
+                });
+            }
+        }
+    }
+
+    // 4. Run actions with bounded concurrency. `buffer_unordered`
+    // dispatches up to CONCURRENT_IO requests at a time and yields each
+    // result as it lands — orders of magnitude faster than a serial loop
+    // when latency dominates each PUT/GET.
+    enum Outcome {
+        Uploaded,
+        Downloaded,
+        Failed(String),
+    }
+    let outcomes: Vec<Outcome> = stream::iter(actions.into_iter())
+        .map(|action| {
+            let client = client.clone();
+            let s3 = s3_arc.clone();
+            let root = root_arc.clone();
+            async move {
+                match action {
+                    Action::Upload { rel, key } => {
+                        let abs = root.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+                        match fs::read(&abs) {
+                            Ok(bytes) => match put_object(&client, &s3, &key, bytes).await {
+                                Ok(_) => Outcome::Uploaded,
+                                Err(e) => Outcome::Failed(format!("upload {}: {}", rel, e)),
+                            },
+                            Err(e) => Outcome::Failed(format!("read {}: {}", rel, e)),
                         }
                     }
-                    Err(e) => {
-                        report.errors.push(format!("download {}: {}", entry.rel, e))
+                    Action::Download { rel, key } => {
+                        match get_object(&client, &s3, &key).await {
+                            Ok((bytes, lm)) => {
+                                let abs =
+                                    root.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+                                if let Some(parent) = abs.parent() {
+                                    let _ = fs::create_dir_all(parent);
+                                }
+                                match fs::write(&abs, &bytes) {
+                                    Ok(_) => {
+                                        let secs = lm.timestamp().max(0);
+                                        let _ = set_file_mtime(
+                                            &abs,
+                                            FileTime::from_unix_time(secs, 0),
+                                        );
+                                        Outcome::Downloaded
+                                    }
+                                    Err(e) => Outcome::Failed(format!("write {}: {}", rel, e)),
+                                }
+                            }
+                            Err(e) => Outcome::Failed(format!("download {}: {}", rel, e)),
+                        }
                     }
                 }
             }
+        })
+        .buffer_unordered(CONCURRENT_IO)
+        .collect()
+        .await;
+
+    for o in outcomes {
+        match o {
+            Outcome::Uploaded => report.uploaded += 1,
+            Outcome::Downloaded => report.downloaded += 1,
+            Outcome::Failed(m) => report.errors.push(m),
         }
     }
 
