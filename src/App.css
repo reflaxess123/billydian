@@ -219,7 +219,7 @@ html, body {
 .theme-icon-btn {
   appearance: none;
   flex-shrink: 0;
-  width: 30px; height: 30px;
+  width: 32px; height: 32px;
   background: var(--surface);
   border: none;
   border-radius: var(--radius-sm);
@@ -228,11 +228,26 @@ html, body {
   padding: 0;
   transition: background 0.15s var(--ease-out), color 0.15s var(--ease-out), transform 0.2s var(--ease-spring);
 }
-.theme-icon-btn:hover {
+.theme-icon-btn:hover:not(:disabled) {
   background: var(--hover);
   color: var(--fg);
   transform: rotate(20deg);
 }
+.theme-icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* The sync button uses the same chassis but paints its glyph in the
+   accent colour: lime in dark, near-black in light. Picks the eye out
+   of the row at a glance. */
+.theme-icon-btn.sync-btn {
+  color: var(--accent);
+}
+.theme-icon-btn.sync-btn:hover:not(:disabled) {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  transform: none;
+}
+.theme-icon-btn.sync-btn:disabled { color: var(--muted); }
+.theme-icon-btn.sync-btn .spin { color: var(--accent); }
 
 /* Right-side cluster: sync feedback (when present) + sync btn + theme */
 .sidebar-top-actions {
@@ -943,24 +958,26 @@ html, body {
   flex-shrink: 0;
 }
 
-/* Discrete width levels — replaces the old range slider. Each dot
-   carries its level number; the active one fills with accent. */
+/* Discrete width levels — sit in a single grouped chip alongside the
+   Wand and Eye/Pencil buttons. Each level is a rounded-square button
+   (same idiom as `.note-icon-btn` next to it), not a circle, so the
+   row reads as a cohesive cluster. */
 .width-levels {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 3px;
+  gap: 2px;
+  padding: 2px;
   background: var(--surface);
   border-radius: var(--radius-sm);
   height: 32px;
 }
 .width-level {
   appearance: none;
-  width: 24px; height: 24px;
+  width: 28px; height: 28px;
   border: none;
   background: transparent;
   color: var(--muted);
-  border-radius: 50%;
+  border-radius: 6px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -968,7 +985,7 @@ html, body {
   font: 700 11px / 1 inherit;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.2px;
-  transition: background 0.12s var(--ease-out), color 0.12s var(--ease-out), transform 0.12s var(--ease-out);
+  transition: background 0.12s var(--ease-out), color 0.12s var(--ease-out);
 }
 .width-level:hover { background: var(--hover); color: var(--fg); }
 .width-level.active {

@@ -145,7 +145,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </span>
             )}
             <button
-              className="theme-icon-btn"
+              className="theme-icon-btn sync-btn"
               onClick={onSync}
               disabled={!s3Ready || syncing}
               title={
@@ -157,7 +157,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               }
               aria-label="Sync vault"
             >
-              <RefreshCw size={14} className={syncing ? "spin" : ""} />
+              <RefreshCw size={15} className={syncing ? "spin" : ""} />
             </button>
             <button
               className="theme-icon-btn"
