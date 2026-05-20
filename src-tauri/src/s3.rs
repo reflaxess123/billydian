@@ -151,8 +151,24 @@ fn sign(
         access_key, credential_scope, signed_headers, signature
     );
 
+    // Dev-mode dump: when sync misbehaves, the canonical request + the
+    // signed string are the first things you want to eyeball.
+    #[cfg(debug_assertions)]
+    {
+        eprintln!("─── SigV4 ───");
+        eprintln!("URL\t{}://{}{}{}{}", "https", host, canonical_uri,
+            if canonical_query.is_empty() { "" } else { "?" }, canonical_query);
+        eprintln!("Canonical request:\n{}", canonical_request);
+        eprintln!("String to sign:\n{}", string_to_sign);
+        eprintln!("─────────────");
+    }
+
+    // Note: we deliberately do NOT put "Host" in the outbound map.
+    // reqwest derives the Host header from the request URL, and any
+    // value we set manually here can be silently ignored. As long as
+    // the URL we GET / PUT to has the same host we signed with, the
+    // signatures match.
     let mut out: HashMap<String, String> = HashMap::new();
-    out.insert("Host".to_string(), host.to_string());
     out.insert("x-amz-content-sha256".to_string(), payload_hash);
     out.insert("x-amz-date".to_string(), timestamp);
     out.insert("Authorization".to_string(), authorization);
@@ -370,9 +386,13 @@ async fn list_objects(s3: &S3Settings) -> Result<Vec<RemoteEntry>, String> {
     }
     let res = req.send().await.map_err(|e| format!("LIST request: {}", e))?;
     let status = res.status();
+    let diag = diag_headers(&res);
     let body = res.text().await.map_err(|e| format!("LIST body: {}", e))?;
     if !status.is_success() {
-        return Err(format!("LIST {} → {}: {}", url, status, snippet(&body, 400)));
+        return Err(format!(
+            "LIST {}{} → {}\n{}",
+            url, diag, status, snippet(&body, 1500)
+        ));
     }
     parse_list_xml(&body, &prefix_for_strip)
 }
@@ -406,6 +426,7 @@ async fn get_object(
     }
     let res = req.send().await.map_err(|e| format!("GET request: {}", e))?;
     let status = res.status();
+    let diag = diag_headers(&res);
     // Pull Last-Modified before we consume the body
     let lm = res
         .headers()
@@ -417,10 +438,9 @@ async fn get_object(
     let body_bytes = res.bytes().await.map_err(|e| format!("GET body: {}", e))?;
     if !status.is_success() {
         return Err(format!(
-            "GET {} → {}: {}",
-            url,
-            status,
-            snippet(&String::from_utf8_lossy(&body_bytes), 400)
+            "GET {}{} → {}\n{}",
+            url, diag, status,
+            snippet(&String::from_utf8_lossy(&body_bytes), 1500)
         ));
     }
     Ok((body_bytes.to_vec(), lm))
@@ -451,13 +471,13 @@ async fn put_object(s3: &S3Settings, key: &str, body: Vec<u8>) -> Result<(), Str
     }
     let res = req.send().await.map_err(|e| format!("PUT request: {}", e))?;
     let status = res.status();
+    let diag = diag_headers(&res);
     if !status.is_success() {
         let body = res.text().await.unwrap_or_default();
         return Err(format!(
-            "PUT {} → {}: {}",
-            url,
-            status,
-            snippet(&body, 400)
+            "PUT {}{} → {}\n{}",
+            url, diag, status,
+            snippet(&body, 1500)
         ));
     }
     Ok(())
@@ -481,6 +501,29 @@ fn snippet(s: &str, n: usize) -> String {
         format!("{}…", &s[..n])
     } else {
         s.to_string()
+    }
+}
+
+/// Pull S3-flavoured diagnostic headers off a reqwest response — Yandex
+/// (and AWS) return `x-amz-request-id` and `x-amz-id-2` that the storage
+/// support team needs to triage a failure.
+fn diag_headers(res: &reqwest::Response) -> String {
+    let req_id = res
+        .headers()
+        .get("x-amz-request-id")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let id2 = res
+        .headers()
+        .get("x-amz-id-2")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if req_id.is_empty() && id2.is_empty() {
+        String::new()
+    } else if id2.is_empty() {
+        format!(" [request-id: {}]", req_id)
+    } else {
+        format!(" [request-id: {} / {}]", req_id, id2)
     }
 }
 

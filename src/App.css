@@ -687,6 +687,38 @@ html, body {
   line-height: 1.4;
   color: var(--danger);
   word-break: break-all;
+  white-space: pre-wrap;
+}
+
+.sync-error-box {
+  background: color-mix(in srgb, var(--danger) 10%, var(--bg-elevated));
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sync-error-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 700 var(--text-xs) / 1 inherit;
+  color: var(--danger);
+}
+.sync-error-box pre {
+  font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--fg);
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  margin: 0;
+  max-height: 280px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .grid-2 {

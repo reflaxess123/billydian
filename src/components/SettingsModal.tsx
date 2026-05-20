@@ -266,15 +266,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </span>
                 </div>
               )}
-              {syncError && !syncing && (
-                <div className="sync-feedback err" title={syncError}>
-                  <AlertTriangle size={14} />
-                  <span>{syncError.length > 90 ? syncError.slice(0, 87) + "…" : syncError}</span>
-                </div>
-              )}
             </div>
+            {syncError && !syncing && (
+              <div className="sync-error-box">
+                <div className="sync-error-head">
+                  <AlertTriangle size={14} /> Sync failed
+                </div>
+                <pre>{syncError}</pre>
+              </div>
+            )}
             {syncReport && syncReport.errors.length > 0 && (
-              <details className="sync-errors">
+              <details className="sync-errors" open>
                 <summary>Errors ({syncReport.errors.length})</summary>
                 <ul>
                   {syncReport.errors.map((e, i) => (
