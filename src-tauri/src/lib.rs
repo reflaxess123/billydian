@@ -541,6 +541,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        // Remembers window position / size / maximised state across
+        // launches. State file lives in <app-config-dir>/window-state.json
+        // and is restored before the window is shown.
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
             // OpenRouter
             generate_mindmap,
