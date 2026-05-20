@@ -308,11 +308,16 @@ html, body {
   align-items: stretch;
   gap: 6px;
 }
+/* Both leading elements share an identical box so the visible space
+   between content and the trailing button is the same in either row.
+   The 2 px right-padding difference between .api-input and
+   .vault-pick-btn was reading as a different gap. */
 .vault-row .vault-pick-btn,
 .gen-input-row > .api-input {
   flex: 1 1 auto;
   min-width: 0;
   height: 36px;
+  padding: 0 12px;
 }
 .vault-new-btn {
   appearance: none;
