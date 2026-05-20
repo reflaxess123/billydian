@@ -301,27 +301,26 @@ html, body {
 
 /* Vault row + gen-input row share the same horizontal layout so the
    sidebar reads as one consistent stack: stretch-tall siblings, fixed
-   36px square trailing button, identical 6px gap. */
+   36px square trailing button, identical 6px gap.
+
+   Grid (not flex) is used here on purpose — flex's basis calculation
+   on the leading element was reading the chip's icon+label vs the
+   input's placeholder text as different content widths, and after the
+   grow/shrink pass the two rows came out sub-pixel-wider on different
+   sides. Grid with `1fr 36px` is fully deterministic: column 1 is
+   always `container − gap − 36px`, regardless of content. */
 .vault-row,
 .gen-input-row {
-  display: flex;
-  align-items: stretch;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px;
   gap: 6px;
+  align-items: stretch;
+  margin: 0;
+  padding: 0;
 }
-/* Both leading elements share an identical box so the visible space
-   between content and the trailing button is the same in either row.
-   `flex: 1 1 0` forces a zero flex-basis on both — the previous
-   `flex: 1 1 auto` was letting the natural content width of the input
-   (placeholder text ~150 px) compete with the chip's (icon+label
-   ~80 px), and after the grow phase the input ended up sub-pixel-
-   wider on Chromium. Resetting `width: auto` strips the input's
-   inherited `width: 100%`, which on a flex-row child also leaks into
-   the basis calculation. */
 .vault-row .vault-pick-btn,
 .gen-input-row > .api-input {
-  flex: 1 1 0;
-  min-width: 0;
-  width: auto;
+  width: 100%;
   height: 36px;
   padding: 0 12px;
 }
